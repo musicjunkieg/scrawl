@@ -93,7 +93,7 @@ pub fn auto(bundle: &ScrawlBundle) -> Rect {
     );
     let settings = autocrop::Settings {
         scope: autocrop::Scope::Whole,
-        ..autocrop::Settings::configured().unwrap_or_default()
+        ..crate::handoff::autocrop_settings().unwrap_or_default()
     };
     let whole = autocrop::compute(&input, &settings).into_iter().next();
     if let Some(crop) = &whole

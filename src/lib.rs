@@ -64,12 +64,12 @@ use clap::{Parser, Subcommand};
 
 use crate::audio::AudioRecorder;
 use crate::capture::{ScreenCaptureSession, discover_target};
+use crate::handoff::summary_markdown;
 use crate::model::{
     CaptureMode, InteractionEvent, SCALE, ScrawlBundle, Shape, Stroke, TargetFrame, TargetInfo,
     TranscriptData, TranscriptSegment, WordTiming, parse_clock_ms,
 };
 use crate::render::render_synthetic_demo_frame;
-use crate::sketch::summary_markdown;
 
 #[derive(Parser)]
 #[command(
@@ -741,6 +741,7 @@ pub fn generate_demo_bundle(out: Option<PathBuf>) -> Result<(PathBuf, ScrawlBund
         None,
         Some("Header inset shifts on expand".into()),
         SourceExtras::default(),
+        &crate::handoff::build_options(),
     )
 }
 
@@ -864,6 +865,7 @@ pub fn run() -> Result<()> {
                 recorded_audio,
                 note,
                 activity,
+                &crate::handoff::build_options(),
             )?;
             print!("{summary}");
             Ok(())
@@ -1051,6 +1053,7 @@ pub fn run() -> Result<()> {
                             recorded,
                             iter_note,
                             iter_activity,
+                            &crate::handoff::build_options(),
                         )?;
                         let _ = handoff::copy_bundle_to_clipboard(&iter_out);
                         runs_ms.push(t0.elapsed().as_secs_f64() * 1_000.0);
@@ -1159,6 +1162,7 @@ pub fn run() -> Result<()> {
                         },
                         ..SourceExtras::default()
                     },
+                    &crate::handoff::build_options(),
                 )?
                 .2
             };

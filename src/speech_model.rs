@@ -256,7 +256,7 @@ pub fn transcribe_again(dir: &Path) -> Result<bool> {
     )?;
     std::fs::write(
         dir.join("summary.md"),
-        crate::sketch::summary_markdown(&bundle, &dir),
+        crate::handoff::summary_markdown(&bundle, &dir),
     )?;
     let _ = std::fs::remove_file(dir.join(PENDING));
     Ok(true)

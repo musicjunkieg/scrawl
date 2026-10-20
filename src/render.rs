@@ -303,9 +303,10 @@ pub fn render_annotated_keyframe(
     strokes: &[Stroke],
     marks: &[Mark],
     events: &[InteractionEvent],
+    agent_context: bool,
 ) -> RgbaFrame {
     let mut frame = base.clone();
-    annotate_keyframe_in_place(&mut frame, keyframe, strokes, marks, events);
+    annotate_keyframe_in_place(&mut frame, keyframe, strokes, marks, events, agent_context);
     frame
 }
 
@@ -315,17 +316,21 @@ pub fn annotate_keyframe_in_place(
     strokes: &[Stroke],
     marks: &[Mark],
     events: &[InteractionEvent],
+    agent_context: bool,
 ) {
-    annotate_keyframe_marks_in_place(frame, keyframe, strokes, marks, events);
+    annotate_keyframe_marks_in_place(frame, keyframe, strokes, marks, events, agent_context);
     stamp_keyframe_badge_in_place(frame, keyframe);
 }
 
+/// `agent_context` is the `agentContext` experiment: it numbers the marks on a frame that shows
+/// two or more.
 pub fn annotate_keyframe_marks_in_place(
     frame: &mut RgbaFrame,
     keyframe: &Keyframe,
     strokes: &[Stroke],
     marks: &[Mark],
     events: &[InteractionEvent],
+    agent_context: bool,
 ) {
     frame.t_ms = keyframe.t;
     let w = frame.width as f32;
@@ -378,7 +383,7 @@ pub fn annotate_keyframe_marks_in_place(
             polygon(frame, &outline, RED);
         }
     }
-    if shown.len() >= 2 && crate::handoff::experiment(crate::handoff::AGENT_CONTEXT) {
+    if shown.len() >= 2 && agent_context {
         draw_mark_numbers(frame, &shown, strokes, k);
     }
     for stroke in strokes.iter().filter(|s| s.laser) {
@@ -1989,11 +1994,11 @@ mod tests {
                 .filter(|p| p[2] > 200 && p[0] < 120)
                 .count()
         };
-        let after = render_annotated_keyframe(&base, &key(1), &[], &[], &[swipe.clone()]);
+        let after = render_annotated_keyframe(&base, &key(1), &[], &[], &[swipe.clone()], false);
         assert!(blue(&after) > 500, "trail missing");
         let mut later = key(1);
         later.t = 6000;
-        let stale = render_annotated_keyframe(&base, &later, &[], &[], &[swipe]);
+        let stale = render_annotated_keyframe(&base, &later, &[], &[], &[swipe], false);
         assert_eq!(blue(&stale), 0, "an old swipe should not be drawn");
     }
 
@@ -2025,7 +2030,7 @@ mod tests {
             laser: false,
             pts: vec![1500, 6000, 0, 5000, 6000, 200, 8500, 6000, 400],
         };
-        let result = render_annotated_keyframe(&base, &key(1), &[stroke.clone()], &[], &[]);
+        let result = render_annotated_keyframe(&base, &key(1), &[stroke.clone()], &[], &[], false);
         let red = result
             .rgba
             .chunks_exact(4)
@@ -2041,7 +2046,7 @@ mod tests {
             t1: 5400,
             ..stroke
         };
-        let result = render_annotated_keyframe(&base, &key(1), &[future], &[], &[]);
+        let result = render_annotated_keyframe(&base, &key(1), &[future], &[], &[], false);
         assert_eq!(&result.rgba[100 * 320 * 4..], &base.rgba[100 * 320 * 4..]);
         assert!(base.rgba.chunks_exact(4).all(|p| p == [20, 20, 20, 255]));
     }
@@ -2082,7 +2087,7 @@ mod tests {
             mark("m2", 1, &keyframe.file),
             mark("m3", 2, "frames/2.png"),
         ];
-        let result = render_annotated_keyframe(&base, &keyframe, &strokes, &marks, &[]);
+        let result = render_annotated_keyframe(&base, &keyframe, &strokes, &marks, &[], false);
         let red_rows = |rows: std::ops::Range<usize>| {
             rows.filter(|y| {
                 result.rgba[y * 320 * 4..(y + 1) * 320 * 4]

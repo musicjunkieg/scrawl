@@ -2906,6 +2906,7 @@ impl ScrawlCoordinator {
                         recorded_audio,
                         None,
                         activity,
+                        &crate::handoff::build_options(),
                     );
                     if let Ok((dir, bundle, _)) = &mut finalized
                         && let Some(Ok(Some(dest))) = route.map(std::thread::JoinHandle::join)

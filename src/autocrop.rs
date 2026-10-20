@@ -27,8 +27,10 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{InteractionEvent, Keyframe, Mark, RgbaFrame, SCALE, Stroke, TargetFrame};
-use crate::windows::{CursorSample, WindowSnapshot};
+use crate::model::{
+    CursorSample, InteractionEvent, Keyframe, Mark, RgbaFrame, SCALE, Stroke, TargetFrame,
+    WindowSnapshot,
+};
 
 /// `[x0, y0, x1, y1]`, normalized to the capture.
 pub type Rect = [f32; 4];
@@ -229,11 +231,6 @@ impl Settings {
             Some(serde_json::Value::Bool(false)) => None,
             Some(other) => Some(serde_json::from_value(other.clone()).unwrap_or_default()),
         }
-    }
-
-    pub fn configured() -> Option<Self> {
-        let config = crate::handoff::load_config_from(&crate::handoff::default_config_path());
-        Self::from_config(config.autocrop.as_ref())
     }
 }
 
@@ -561,22 +558,7 @@ impl Input {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CropKind {
-    /// One window (plus any ink outside it).
-    Window,
-    /// Two or more windows.
-    Windows,
-    /// Around the activity inside a window too big to crop to.
-    Focus,
-    /// Around the activity, with no window to snap to.
-    Activity,
-    /// No activity: the previous crop, the frontmost window or the screen.
-    Fallback,
-    /// Not worth cropping.
-    Full,
-}
+pub use crate::model::CropKind;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1738,7 +1720,8 @@ pub fn change_regions(prev: &RgbaFrame, cur: &RgbaFrame) -> Vec<Rect> {
 
 /// Keyframes ready to write: annotated, and cropped when the capture is a Screen capture and the
 /// crop is worth it. The second value is the info for `scrawl.json` and the full annotated
-/// frames (for `frames-full/`), present only when something was cropped.
+/// frames (for `frames-full/`), present only when something was cropped. `agent_context` is the
+/// `agentContext` experiment (`render::annotate_keyframe_marks_in_place`).
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn annotate_and_crop(
     selected: Vec<(Keyframe, RgbaFrame)>,
@@ -1751,6 +1734,7 @@ pub fn annotate_and_crop(
     events: &[InteractionEvent],
     windows: &[WindowSnapshot],
     cursor: &[CursorSample],
+    agent_context: bool,
 ) -> (
     Vec<(Keyframe, RgbaFrame)>,
     Option<(crate::model::AutocropInfo, Vec<(Keyframe, RgbaFrame)>)>,
@@ -1804,7 +1788,14 @@ pub fn annotate_and_crop(
                 .into_iter()
                 .map(|(kf, mut frame)| {
                     scope.spawn(move || {
-                        annotate_keyframe_marks_in_place(&mut frame, &kf, strokes, marks, events);
+                        annotate_keyframe_marks_in_place(
+                            &mut frame,
+                            &kf,
+                            strokes,
+                            marks,
+                            events,
+                            agent_context,
+                        );
                         (kf, frame)
                     })
                 })
@@ -1824,7 +1815,14 @@ pub fn annotate_and_crop(
             .map(|((kf, mut raw), crop)| {
                 scope.spawn(move || {
                     let out = if crop.kind == CropKind::Full {
-                        annotate_keyframe_marks_in_place(&mut raw, &kf, strokes, marks, events);
+                        annotate_keyframe_marks_in_place(
+                            &mut raw,
+                            &kf,
+                            strokes,
+                            marks,
+                            events,
+                            agent_context,
+                        );
                         raw.clone()
                     } else {
                         let mut out = crop_frame(&raw, crop.rect);
@@ -1835,8 +1833,16 @@ pub fn annotate_and_crop(
                             &view.strokes,
                             &view.marks,
                             &view.events,
+                            agent_context,
                         );
-                        annotate_keyframe_marks_in_place(&mut raw, &kf, strokes, marks, events);
+                        annotate_keyframe_marks_in_place(
+                            &mut raw,
+                            &kf,
+                            strokes,
+                            marks,
+                            events,
+                            agent_context,
+                        );
                         out
                     };
                     let r = crop.rect.map(f64::from);
@@ -1906,8 +1912,7 @@ pub fn write_full_frames(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{CaptureMode, KeyframeReason, TargetInfo};
-    use crate::windows::WindowEntry;
+    use crate::model::{CaptureMode, KeyframeReason, TargetInfo, WindowEntry};
 
     const FRAME: TargetFrame = TargetFrame {
         x: 0.0,
@@ -2195,6 +2200,7 @@ mod tests {
             &events,
             &windows,
             &[],
+            false,
         );
         let (info, full) = cropped.expect("cropped");
         assert_eq!((frames[0].1.width, frames[0].1.height), (600, 400));
@@ -2224,6 +2230,7 @@ mod tests {
                 &events,
                 &windows,
                 &[],
+                false,
             );
             assert!(cropped.is_none());
             assert_eq!(frames[0].1.width, 1728);

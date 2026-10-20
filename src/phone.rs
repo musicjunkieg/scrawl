@@ -534,6 +534,7 @@ pub fn build_movie_bundle(
                                 &preview_marks,
                                 events_ref,
                                 &crate::windows::ActivityLog::default(),
+                                crate::handoff::experiment(crate::handoff::AGENT_CONTEXT),
                             );
                             return Ok((probe, raw_frames, decode_ms, true, prep));
                         }
@@ -609,6 +610,7 @@ pub fn build_movie_bundle(
         Some(capture.movie),
         capture.note,
         extras,
+        &crate::handoff::build_options(),
     )
 }
 

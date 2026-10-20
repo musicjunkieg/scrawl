@@ -365,7 +365,7 @@ pub fn handle(stream: &mut TcpStream, header: &str, expected_token: &str) -> Res
             };
             let wanted = crate::handoff::experiment(crate::handoff::AGENT_CONTEXT);
             if wanted && let Ok(post) = serde_json::from_slice::<crate::page::Post>(&bytes) {
-                crate::page::record(&page_origin, post);
+                crate::page::record(&page_origin, post, crate::now_epoch_ms());
             }
             respond_json(
                 stream,

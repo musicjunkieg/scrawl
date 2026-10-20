@@ -541,7 +541,7 @@ pub fn record_destination(dir: &Path, bundle: &mut ScrawlBundle, dest: Destinati
     std::fs::write(dir.join("scrawl.json"), serde_json::to_vec_pretty(bundle)?)?;
     std::fs::write(
         dir.join("summary.md"),
-        crate::sketch::summary_markdown(bundle, dir),
+        crate::handoff::summary_markdown(bundle, dir),
     )?;
     Ok(())
 }

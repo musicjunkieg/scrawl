@@ -15,8 +15,20 @@ use crate::model::{
     TargetInfo, TranscriptData, keyframe_budget,
 };
 use crate::render::render_contact_sheet;
-use crate::sketch::{marks_of, summary_markdown};
+use crate::sketch::{marks_of, summary_markdown_with};
 use crate::{autocrop, capture, helper, model, render, speech_model, transcribe, windows};
+
+/// What a build would otherwise read from `config.json`. The app makes it with
+/// `handoff::build_options`; a library caller fills it in.
+#[derive(Clone, Debug, Default)]
+pub struct BuildOptions {
+    /// The `agentContext` experiment: numbered marks on shared frames and the extra context in
+    /// `summary.md`.
+    pub agent_context: bool,
+    /// Autocrop for Display captures that don't pass their own (`SourceExtras::autocrop`);
+    /// `None` leaves them uncropped.
+    pub autocrop: Option<autocrop::Settings>,
+}
 
 pub fn now_epoch_ms() -> u64 {
     SystemTime::now()
@@ -100,6 +112,7 @@ pub fn prepare_visuals(
     marks: &[Mark],
     events: &[InteractionEvent],
     activity: &windows::ActivityLog,
+    agent_context: bool,
 ) -> Option<PreparedVisuals> {
     if selected.is_empty() {
         return None;
@@ -115,6 +128,7 @@ pub fn prepare_visuals(
         events,
         &activity.windows,
         &activity.cursor,
+        agent_context,
     );
     let keyframes: Vec<model::Keyframe> =
         annotated_frames.iter().map(|(kf, _)| kf.clone()).collect();
@@ -270,6 +284,7 @@ pub fn finalize_capture_bundle(
     recorded_audio: Option<RecordedAudio>,
     note: Option<String>,
     activity: windows::ActivityLog,
+    options: &BuildOptions,
 ) -> Result<(PathBuf, ScrawlBundle, String)> {
     let started_at = activity
         .stop_started
@@ -289,7 +304,7 @@ pub fn finalize_capture_bundle(
     let wav_path = bundle_dir.join("audio.wav");
     let has_wav = wav_path.exists();
     let crop_settings = (target.mode == CaptureMode::Display)
-        .then(autocrop::Settings::configured)
+        .then(|| options.autocrop.clone())
         .flatten();
     let ((transcript, transcribe_ms), (predecoded, prepared)) = std::thread::scope(|scope| {
         let transcribe_handle = scope.spawn(|| {
@@ -337,6 +352,7 @@ pub fn finalize_capture_bundle(
                     &preview_marks,
                     &events,
                     &activity,
+                    options.agent_context,
                 );
                 (cache, vis)
             } else {
@@ -373,6 +389,7 @@ pub fn finalize_capture_bundle(
             },
             ..SourceExtras::default()
         },
+        options,
     )
 }
 
@@ -395,6 +412,7 @@ pub fn build_bundle_from_parts(
     video_path: Option<PathBuf>,
     note: Option<String>,
     extras: SourceExtras,
+    options: &BuildOptions,
 ) -> Result<(PathBuf, ScrawlBundle, String)> {
     let total_started = extras
         .timings
@@ -485,7 +503,7 @@ pub fn build_bundle_from_parts(
             autocrop: prep.autocrop,
             destination: None,
         };
-        let summary = summary_markdown(&bundle, bundle_dir);
+        let summary = summary_markdown_with(&bundle, bundle_dir, options.agent_context);
         std::fs::create_dir_all(bundle_dir.join("frames"))
             .with_context(|| format!("could not create {}", bundle_dir.display()))?;
         #[cfg(unix)]
@@ -576,7 +594,7 @@ pub fn build_bundle_from_parts(
 
     let crop_settings = match extras.autocrop {
         Some(settings) => settings,
-        None if target.mode == CaptureMode::Display => autocrop::Settings::configured(),
+        None if target.mode == CaptureMode::Display => options.autocrop.clone(),
         None => None,
     };
     let (mut annotated_frames, mut cropped) = autocrop::annotate_and_crop(
@@ -590,6 +608,7 @@ pub fn build_bundle_from_parts(
         &events,
         &extras.activity.windows,
         &extras.activity.cursor,
+        options.agent_context,
     );
     let keyframes: Vec<model::Keyframe> =
         annotated_frames.iter().map(|(kf, _)| kf.clone()).collect();
@@ -650,7 +669,7 @@ pub fn build_bundle_from_parts(
         render::stamp_keyframe_badges(full);
     }
     let rendered_at = std::time::Instant::now();
-    let summary = summary_markdown(&bundle, bundle_dir);
+    let summary = summary_markdown_with(&bundle, bundle_dir, options.agent_context);
     std::thread::scope(|scope| -> Result<()> {
         let full_write = match (&cropped, &full_sheet) {
             (Some((info, full)), Some(sheet)) => {
