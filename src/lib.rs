@@ -867,7 +867,7 @@ pub fn run() -> Result<()> {
                             .map(audio::recorded_audio_from_wav)
                             .transpose()?
                             .map(|mut recorded| {
-                                recorded.live = live_transcribe::Slot::new(live);
+                                recorded.live = transcribe::Slot::live(live);
                                 recorded
                             });
                         iter_activity.stop_started = Some(t0);

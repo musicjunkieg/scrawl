@@ -4,6 +4,7 @@
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 
@@ -142,6 +143,36 @@ pub trait Transcriber {
     fn transcribe(&mut self, speech: Speech<'_>) -> Result<Option<TranscriptData>>;
 }
 
+/// The engine that heard a recording while it was made, handed to `transcribe` with it. Copies of
+/// the recording share it; the first `take` gets it.
+#[derive(Clone, Default)]
+pub struct Slot(Arc<Mutex<Option<Box<dyn Transcriber + Send>>>>);
+
+impl Slot {
+    pub fn new(engine: Option<Box<dyn Transcriber + Send>>) -> Self {
+        Self(Arc::new(Mutex::new(engine)))
+    }
+
+    /// Holds a live transcription (`crate::live_transcribe`), if one ran.
+    pub fn live(live: Option<crate::live_transcribe::Live>) -> Self {
+        Self::new(live.map(|live| Box::new(Live(Some(live))) as Box<dyn Transcriber + Send>))
+    }
+
+    pub fn take(&self) -> Option<Box<dyn Transcriber + Send>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
+}
+
+impl std::fmt::Debug for Slot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let held = self.0.lock().map(|slot| slot.is_some()).unwrap_or(false);
+        f.debug_tuple("Slot").field(&held).finish()
+    }
+}
+
 /// Missing microphones and a failed transcriber never prevent saving a bundle.
 pub fn transcribe(wav: Option<&Path>, audio: Option<&RecordedAudio>) -> TranscriptData {
     let (Some(wav), Some(audio)) = (wav, audio.filter(|audio| audio.sample_count > 0)) else {
@@ -156,13 +187,15 @@ pub fn transcribe(wav: Option<&Path>, audio: Option<&RecordedAudio>) -> Transcri
         duration_ms: audio.duration_ms,
     };
     let mut hex = Hex;
-    let mut live = Live(audio.live.take());
+    let mut live = audio.live.take();
     let mut local = Local;
     let mut engines: Vec<&mut dyn Transcriber> = Vec::with_capacity(3);
     if Engine::preferred() == Engine::Hex {
         engines.push(&mut hex);
     }
-    engines.push(&mut live);
+    if let Some(live) = live.as_deref_mut() {
+        engines.push(live);
+    }
     engines.push(&mut local);
     transcribe_with(&mut engines, speech)
 }
@@ -366,6 +399,16 @@ mod tests {
     #[test]
     fn an_empty_live_slot_passes_without_finishing_anything() {
         assert!(Live(None).transcribe(speech()).unwrap().is_none());
+    }
+
+    #[test]
+    fn copies_of_a_slot_share_one_engine() {
+        let slot = Slot::new(Some(Box::new(Fake::new(|| Ok(None)))));
+        let copy = slot.clone();
+        assert_eq!(format!("{slot:?}"), "Slot(true)");
+        assert!(copy.take().is_some());
+        assert!(slot.take().is_none());
+        assert!(Slot::default().take().is_none());
     }
 
     #[test]

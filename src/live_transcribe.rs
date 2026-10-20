@@ -322,30 +322,6 @@ pub fn simulate(wav_bytes: &[u8], speed: f64) -> Result<Live> {
     Ok(live)
 }
 
-/// Shares a live transcription between copies of a recording; the first `take` gets it.
-#[derive(Clone, Default)]
-pub struct Slot(Arc<Mutex<Option<Live>>>);
-
-impl Slot {
-    pub fn new(live: Option<Live>) -> Self {
-        Self(Arc::new(Mutex::new(live)))
-    }
-
-    pub fn take(&self) -> Option<Live> {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-    }
-}
-
-impl std::fmt::Debug for Slot {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let live = self.0.lock().map(|live| live.is_some()).unwrap_or(false);
-        f.debug_tuple("Slot").field(&live).finish()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
