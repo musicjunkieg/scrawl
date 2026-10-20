@@ -38,6 +38,7 @@ use crate::phone::PhoneSession;
 use crate::sketch::timeline;
 #[cfg(target_os = "windows")]
 use crate::win::overlay::InkOverlay as LaserOverlay;
+use crate::windows::ActivityCapture;
 
 const SIDEBAR_BG: u32 = 0x111111;
 const CANVAS_BG: u32 = 0x161616;
@@ -640,7 +641,7 @@ enum CaptureSource {
         session: Box<dyn ScreenCapture>,
         audio: Option<Box<dyn AudioCapture>>,
         /// Screen mode only: which windows were where, for `scrawl autocrop`.
-        windows: Option<crate::windows::WindowLogger>,
+        windows: Option<Box<dyn ActivityCapture>>,
     },
     /// The helper's mirror window records the phone's native video and the narration.
     Phone(PhoneSession),
@@ -2596,11 +2597,11 @@ impl ScrawlCoordinator {
                 .started_at
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            crate::windows::WindowLogger::start(
+            Box::new(crate::windows::WindowLogger::start(
                 target.frame,
                 started_at,
                 Arc::clone(&self.telemetry.window_log_request),
-            )
+            )) as Box<dyn ActivityCapture>
         });
         self.active_recording = Some(ActiveRecording {
             started: Instant::now(),
@@ -2884,11 +2885,8 @@ impl ScrawlCoordinator {
                     let stop_started = Instant::now();
                     let (recording, recorded_audio, mut activity) = std::thread::scope(|s| {
                         let screen_handle = s.spawn(|| screen_session.stop());
-                        let win_handle = s.spawn(|| {
-                            window_log
-                                .map(crate::windows::WindowLogger::stop)
-                                .unwrap_or_default()
-                        });
+                        let win_handle =
+                            s.spawn(|| window_log.map(ActivityCapture::stop).unwrap_or_default());
                         let audio = audio_recorder.and_then(|r| r.stop().ok());
                         (
                             screen_handle.join().unwrap(),

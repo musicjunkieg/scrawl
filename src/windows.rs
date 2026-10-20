@@ -487,6 +487,12 @@ pub fn snapshot(
     })
 }
 
+/// One window and cursor log in progress. `WindowLogger` reads the window server; another
+/// source only has to hand back an `ActivityLog` when stopped.
+pub trait ActivityCapture: Send {
+    fn stop(self: Box<Self>) -> ActivityLog;
+}
+
 /// Background worker that logs windows and the cursor during a Screen-mode capture.
 ///
 /// Snapshots are taken at the start, right after `request` is raised (click, ink or laser
@@ -530,6 +536,12 @@ impl WindowLogger {
             ));
         }
         log
+    }
+}
+
+impl ActivityCapture for WindowLogger {
+    fn stop(self: Box<Self>) -> ActivityLog {
+        WindowLogger::stop(*self)
     }
 }
 
