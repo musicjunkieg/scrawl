@@ -24,8 +24,8 @@ pub(crate) use platform::{gpui_display_for, hwnd_of, set_app_icon};
 
 use crate::audio::{AudioCapture, AudioRecorder};
 use crate::capture::{
-    LiveOverlayEvent, ScreenCaptureSession, SharedCaptureTelemetry, current_mouse_screen,
-    discover_target, install_global_hotkeys, list_selectable_windows,
+    LiveOverlayEvent, ScreenCapture, ScreenCaptureSession, SharedCaptureTelemetry,
+    current_mouse_screen, discover_target, install_global_hotkeys, list_selectable_windows,
     record_external_frontmost_app, region_target, scrawl_log, selectable_window_at,
     set_escape_hotkey_enabled, shortcut_from_key_and_mods, start_global_input_tap,
     update_global_shortcut,
@@ -637,7 +637,7 @@ impl IslandPhase {
 
 enum CaptureSource {
     Screen {
-        session: ScreenCaptureSession,
+        session: Box<dyn ScreenCapture>,
         audio: Option<Box<dyn AudioCapture>>,
         /// Screen mode only: which windows were where, for `scrawl autocrop`.
         windows: Option<crate::windows::WindowLogger>,
@@ -2584,11 +2584,11 @@ impl ScrawlCoordinator {
             .map(|recorder| Box::new(recorder) as Box<dyn AudioCapture>);
         start_metric("audio_start_ms", stage);
         let stage = Instant::now();
-        let screen_session = ScreenCaptureSession::start(
+        let screen_session: Box<dyn ScreenCapture> = Box::new(ScreenCaptureSession::start(
             target.clone(),
             Some(video_path),
             Arc::clone(&self.telemetry.excluded_window_ids),
-        );
+        ));
         start_metric("sck_start_ms", stage);
         let window_log = (target.mode == CaptureMode::Display).then(|| {
             let started_at = *self
