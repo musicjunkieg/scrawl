@@ -27,8 +27,10 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{InteractionEvent, Keyframe, Mark, RgbaFrame, SCALE, Stroke, TargetFrame};
-use crate::windows::{CursorSample, WindowSnapshot};
+use crate::model::{
+    CursorSample, InteractionEvent, Keyframe, Mark, RgbaFrame, SCALE, Stroke, TargetFrame,
+    WindowSnapshot,
+};
 
 /// `[x0, y0, x1, y1]`, normalized to the capture.
 pub type Rect = [f32; 4];
@@ -561,22 +563,7 @@ impl Input {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CropKind {
-    /// One window (plus any ink outside it).
-    Window,
-    /// Two or more windows.
-    Windows,
-    /// Around the activity inside a window too big to crop to.
-    Focus,
-    /// Around the activity, with no window to snap to.
-    Activity,
-    /// No activity: the previous crop, the frontmost window or the screen.
-    Fallback,
-    /// Not worth cropping.
-    Full,
-}
+pub use crate::model::CropKind;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1906,8 +1893,7 @@ pub fn write_full_frames(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{CaptureMode, KeyframeReason, TargetInfo};
-    use crate::windows::WindowEntry;
+    use crate::model::{CaptureMode, KeyframeReason, TargetInfo, WindowEntry};
 
     const FRAME: TargetFrame = TargetFrame {
         x: 0.0,

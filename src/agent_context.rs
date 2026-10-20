@@ -709,7 +709,7 @@ fn merge_boxes(boxes: &[[f32; 4]]) -> Vec<[f32; 4]> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::windows::WindowEntry;
+    use crate::model::WindowEntry;
 
     fn stroke(t0: u64, x: f32, y: f32) -> Stroke {
         let p = |v: f32| (v * SCALE as f32) as i32;
