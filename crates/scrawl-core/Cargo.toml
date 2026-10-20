@@ -1,0 +1,23 @@
+[package]
+name = "scrawl-core"
+version = "0.3.5"
+edition = "2024"
+license = "MIT"
+description = "Scrawl's bundle compiler: keyframes, ink, contact sheet and summary.md from a capture."
+
+[dependencies]
+anyhow = "1.0.104"
+png = "0.18.1"
+scrawl-bundle = { path = "../scrawl-bundle" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+
+# Text on frames uses the system's fonts where there are bindings; elsewhere (Linux, wasm) a
+# built-in bitmap font.
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10.0"
+core-graphics = "0.24.0"
+core-text = "21.0.0"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+ab_glyph = "0.2.32"

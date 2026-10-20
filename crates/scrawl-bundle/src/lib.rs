@@ -1,3 +1,6 @@
+//! The `.scrawl` bundle format: the types `scrawl.json` is made of, shared by the bundle
+//! compiler (`scrawl-core`) and the app.
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};

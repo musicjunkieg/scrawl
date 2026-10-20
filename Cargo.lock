@@ -4721,12 +4721,37 @@ dependencies = [
  "objc2-quartz-core",
  "png 0.18.1",
  "raw-window-handle",
+ "scrawl-bundle",
+ "scrawl-core",
  "screencapturekit",
  "serde",
  "serde_json",
  "transcribe-cpp",
  "tray-icon",
  "windows 0.61.3",
+]
+
+[[package]]
+name = "scrawl-bundle"
+version = "0.3.5"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "scrawl-core"
+version = "0.3.5"
+dependencies = [
+ "ab_glyph",
+ "anyhow",
+ "core-foundation 0.10.0",
+ "core-graphics",
+ "core-text",
+ "png 0.18.1",
+ "scrawl-bundle",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
