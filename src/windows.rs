@@ -714,7 +714,12 @@ mod tests {
         let logger = WindowLogger::start(frame(), Instant::now(), Arc::clone(&request));
         thread::sleep(Duration::from_millis(150));
         request.store(true, Ordering::Release);
-        thread::sleep(Duration::from_millis(150));
+        // A snapshot can take well over a tick on a busy CI runner, so wait for the worker to
+        // take the request instead of sleeping a fixed time.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while request.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
         assert!(!request.load(Ordering::Acquire), "the request was taken");
         let log = logger.stop();
         assert!(log.snapshot_calls >= 2, "{} snapshots", log.snapshot_calls);
