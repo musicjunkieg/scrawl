@@ -8,6 +8,7 @@ pub use scrawl_bundle as model;
 pub mod agent_context;
 pub mod autocrop;
 pub mod build;
+pub mod demo;
 pub mod keyframes;
 pub mod page;
 pub mod render;
