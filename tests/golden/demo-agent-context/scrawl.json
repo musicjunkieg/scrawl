@@ -1,0 +1,432 @@
+{
+  "version": 1,
+  "id": "demo",
+  "createdAtMs": 0,
+  "durationMs": 9800,
+  "target": {
+    "mode": "window",
+    "app": "OpenCode",
+    "bundleId": "ai.opencode.desktop",
+    "windowTitle": "session/tool-running — OpenCode",
+    "windowId": 4210,
+    "displayId": 1,
+    "frame": {
+      "x": 100.0,
+      "y": 60.0,
+      "width": 1280.0,
+      "height": 800.0,
+      "scale": 2.0
+    }
+  },
+  "transcript": {
+    "source": "speech-analyzer",
+    "model": "SpeechTranscriber en_US",
+    "text": "When I click Used 12 tools this band header jumps down by four pixels, and the row spacing under the card feels too tight.",
+    "segments": [
+      {
+        "t0": 600,
+        "t1": 4100,
+        "text": "When I click Used 12 tools this band header jumps down by four pixels,"
+      },
+      {
+        "t0": 5400,
+        "t1": 9400,
+        "text": "and the row spacing under the card feels too tight."
+      }
+    ],
+    "words": [
+      {
+        "t0": 600,
+        "t1": 850,
+        "text": "When"
+      },
+      {
+        "t0": 850,
+        "t1": 980,
+        "text": "I"
+      },
+      {
+        "t0": 980,
+        "t1": 1320,
+        "text": "click"
+      },
+      {
+        "t0": 1320,
+        "t1": 1650,
+        "text": "Used"
+      },
+      {
+        "t0": 1650,
+        "t1": 1900,
+        "text": "12"
+      },
+      {
+        "t0": 1900,
+        "t1": 2300,
+        "text": "tools"
+      },
+      {
+        "t0": 2450,
+        "t1": 2700,
+        "text": "this"
+      },
+      {
+        "t0": 2700,
+        "t1": 3050,
+        "text": "band"
+      },
+      {
+        "t0": 3050,
+        "t1": 3400,
+        "text": "header"
+      },
+      {
+        "t0": 3400,
+        "t1": 3700,
+        "text": "jumps"
+      },
+      {
+        "t0": 3700,
+        "t1": 3900,
+        "text": "down"
+      },
+      {
+        "t0": 3900,
+        "t1": 4100,
+        "text": "by four pixels,"
+      },
+      {
+        "t0": 5400,
+        "t1": 5800,
+        "text": "and the"
+      },
+      {
+        "t0": 5800,
+        "t1": 6300,
+        "text": "row spacing"
+      },
+      {
+        "t0": 6300,
+        "t1": 7200,
+        "text": "under the card"
+      },
+      {
+        "t0": 7800,
+        "t1": 9400,
+        "text": "feels too tight."
+      }
+    ]
+  },
+  "note": "Header inset shifts on expand",
+  "strokes": [
+    {
+      "t0": 2900,
+      "t1": 3548,
+      "fw": 1280,
+      "fh": 800,
+      "on": "Band header",
+      "pts": [
+        6500,
+        1500,
+        0,
+        6480,
+        1596,
+        18,
+        6422,
+        1688,
+        36,
+        6326,
+        1775,
+        54,
+        6196,
+        1854,
+        72,
+        6036,
+        1921,
+        90,
+        5850,
+        1976,
+        108,
+        5645,
+        2017,
+        126,
+        5426,
+        2042,
+        144,
+        5200,
+        2050,
+        162,
+        4974,
+        2042,
+        180,
+        4755,
+        2017,
+        198,
+        4550,
+        1976,
+        216,
+        4364,
+        1921,
+        234,
+        4204,
+        1854,
+        252,
+        4074,
+        1775,
+        270,
+        3978,
+        1688,
+        288,
+        3920,
+        1596,
+        306,
+        3900,
+        1500,
+        324,
+        3920,
+        1404,
+        342,
+        3978,
+        1312,
+        360,
+        4074,
+        1225,
+        378,
+        4204,
+        1146,
+        396,
+        4364,
+        1079,
+        414,
+        4550,
+        1024,
+        432,
+        4755,
+        983,
+        450,
+        4974,
+        958,
+        468,
+        5200,
+        950,
+        486,
+        5426,
+        958,
+        504,
+        5645,
+        983,
+        522,
+        5850,
+        1024,
+        540,
+        6036,
+        1079,
+        558,
+        6196,
+        1146,
+        576,
+        6326,
+        1225,
+        594,
+        6422,
+        1312,
+        612,
+        6480,
+        1404,
+        630,
+        6500,
+        1500,
+        648
+      ]
+    },
+    {
+      "t0": 5800,
+      "t1": 5992,
+      "fw": 1280,
+      "fh": 800,
+      "on": "Used 12 tools",
+      "pts": [
+        2200,
+        4800,
+        0,
+        2383,
+        4700,
+        16,
+        2567,
+        4600,
+        32,
+        2750,
+        4500,
+        48,
+        2933,
+        4400,
+        64,
+        3117,
+        4300,
+        80,
+        3300,
+        4200,
+        96,
+        3483,
+        4100,
+        112,
+        3667,
+        4000,
+        128,
+        3850,
+        3900,
+        144,
+        4033,
+        3800,
+        160,
+        4217,
+        3700,
+        176,
+        4400,
+        3600,
+        192
+      ]
+    },
+    {
+      "t0": 6100,
+      "t1": 6160,
+      "fw": 1280,
+      "fh": 800,
+      "on": "Used 12 tools",
+      "pts": [
+        4100,
+        3500,
+        0,
+        4400,
+        3600,
+        30,
+        4200,
+        4000,
+        60
+      ]
+    },
+    {
+      "t0": 8900,
+      "t1": 8900,
+      "fw": 1280,
+      "fh": 800,
+      "on": "Send button",
+      "pin": 1,
+      "pts": [
+        8800,
+        8800,
+        0
+      ]
+    }
+  ],
+  "marks": [
+    {
+      "id": "m1",
+      "strokes": [
+        0
+      ],
+      "t0": 2900,
+      "t1": 3548,
+      "boxNorm": [
+        0.39,
+        0.095,
+        0.65,
+        0.205
+      ],
+      "shape": "mark",
+      "on": "Band header",
+      "description": "marked region x 0.39–0.65, y 0.09–0.20 over “Band header”",
+      "frame": "frames/frame-02.png"
+    },
+    {
+      "id": "m2",
+      "strokes": [
+        1,
+        2
+      ],
+      "t0": 5800,
+      "t1": 6160,
+      "boxNorm": [
+        0.22,
+        0.35,
+        0.44,
+        0.48
+      ],
+      "shape": "arrow",
+      "from": [
+        0.22,
+        0.48
+      ],
+      "to": [
+        0.44,
+        0.36
+      ],
+      "on": "Used 12 tools",
+      "description": "drew an arrow from x 0.22, y 0.48 pointing to x 0.44, y 0.36 over “Used 12 tools”",
+      "frame": "frames/frame-02.png"
+    },
+    {
+      "id": "m3",
+      "strokes": [
+        3
+      ],
+      "t0": 8900,
+      "t1": 8900,
+      "boxNorm": [
+        0.88,
+        0.88,
+        0.88,
+        0.88
+      ],
+      "shape": "pin",
+      "pin": 1,
+      "on": "Send button",
+      "description": "pin 1 at x 0.88, y 0.88 over “Send button”",
+      "frame": "frames/frame-02.png"
+    }
+  ],
+  "events": [
+    {
+      "kind": "click",
+      "t": 1250,
+      "x": 0.46,
+      "y": 0.36,
+      "button": "left",
+      "label": "Used 12 tools",
+      "role": "button"
+    },
+    {
+      "kind": "scroll",
+      "t": 4800,
+      "x": 0.55,
+      "y": 0.55,
+      "dx": 0.0,
+      "dy": -240.0,
+      "label": "Transcript"
+    }
+  ],
+  "keyframes": [
+    {
+      "index": 1,
+      "t": 1500,
+      "reason": "click",
+      "file": "frames/frame-01.png",
+      "event": "clicked button “Used 12 tools” (x 0.46, y 0.36)",
+      "said": "When I click Used 12 tools this band",
+      "cursor": [
+        0.46,
+        0.36
+      ]
+    },
+    {
+      "index": 2,
+      "t": 9200,
+      "reason": "mark",
+      "file": "frames/frame-02.png",
+      "event": "marked region x 0.39–0.65, y 0.09–0.20 over “Band header”; drew an arrow from x 0.22, y 0.48 pointing to x 0.44, y 0.36 over “Used 12 tools”; pin 1 at x 0.88, y 0.88 over “Send button”",
+      "said": "header jumps down by four pixels, and the row spacing under the card feels too tight.",
+      "markId": "m1"
+    }
+  ],
+  "contactSheet": "contact-sheet.png"
+}
