@@ -1,12 +1,54 @@
 # Scrawl as a library: plan
 
-Status: phases 1–5 done (the app is a library crate; `crates/scrawl-bundle` and `crates/scrawl-core` build on Linux and wasm32). Written 2026-10-19.
+Status: phases 1–6a done; 6b (capture traits) is next. See **Status and handoff** below. Written 2026-10-19.
 
 Goal: any app can add Scrawl's capture-and-compile loop as a dependency, in three shapes:
 
 1. **Rust crate** for Rust apps and tools.
 2. **Swift package** for iOS (exists: ScrawlKit) and macOS (new).
 3. **npm package** for web apps.
+
+
+## Status and handoff
+
+Updated 2026-10-20. Start here if you are picking this work up.
+
+### Done (all merged into `main`)
+
+| Phase | PR | What landed |
+|---|---|---|
+| Plan | #1 | This document |
+| 1 | #2 | `src/lib.rs` is the crate; `src/main.rs` only calls `scrawl::run()` |
+| 2 | #3 | The pipeline moved into `src/compile.rs` |
+| 3 | #5 | `BuildOptions`: the core takes `agentContext` and autocrop as inputs and reads no config or clock; `WindowSnapshot`, `WindowEntry`, `CursorSample` and `CropKind` live in `model` |
+| 4 | #6 | Golden test: the demo bundle's `scrawl.json` and `summary.md` in `tests/golden/` |
+| 5 | #7 | Workspace: `crates/scrawl-bundle` (format) and `crates/scrawl-core` (compiler); `system-fonts` feature; Linux and wasm CI job |
+| 6a | #8, #9 | `scrawl_core::build` (the whole bundle pipeline) and `scrawl_core::demo`; the golden test runs in the core |
+| Fix | #4 | `windows::tests::logger_snapshots_at_start_and_right_after_a_request` polls instead of sleeping |
+
+Another Rust app can already depend on `scrawl-core` and call `build::build_bundle_from_parts` with its own frames, strokes, events and transcript.
+
+### Next: phase 6b, capture traits
+
+Goal: a `scrawl-capture` crate with traits for what the app records, and the macOS and Windows implementations behind them, so another Rust app can record as well as compile.
+
+- Screen: `ScreenCaptureSession` and `ScreenRecording` in `src/capture.rs`, with the platform side in `src/capture/macos.rs` and `src/capture/windows.rs` (`pub use platform::*`).
+- Target: `discover_target` / `discover_target_at` (one per platform module).
+- Audio: `AudioRecorder` and `RecordedAudio` in `src/audio.rs`, and `src/mic.rs`.
+- Window and cursor log: `windows::WindowLogger` and `ActivityLog` in `src/windows.rs`.
+- Start by drawing the trait boundary in the app (traits in `src/capture.rs`, the existing code as their implementation) and only then move files into a crate, as phases 1–5 did.
+- Suggested order: the `Transcriber` trait first (smallest, `src/transcribe.rs`), then audio, then screen.
+
+After 6b come phases 7 (`scrawl-route`), 8 (`scrawl-ffi` for ScrawlKit), 9 (ScrawlKit macOS) and 10 (`@scrawl/web`), as in **Phases** below.
+
+### Working notes
+
+- **Linux can't build the app.** Its macOS/Windows code fails `cargo check` on Linux with about 113 error lines. Check a change by comparing the sorted error set (messages, without line numbers) of `cargo check -p scrawl --tests` against `main`: they must be identical. The crates build and test normally: `cargo test -p scrawl-bundle -p scrawl-core`, `cargo build -p scrawl-core --target wasm32-unknown-unknown`.
+- **CI** (`.github/workflows/check.yml`) runs macOS, Windows and `Linux core and wasm`, about 5–15 minutes. It is the only real build of the app. Plain `cargo test` covers the crates through `default-members`.
+- **Golden files.** `SCRAWL_UPDATE_GOLDEN=1 cargo test -p scrawl-core golden` rewrites them (runs on Linux). If a change must alter them, review the diff. When files can only be made on CI, the test prints each mismatching file between `----- actual … -----` markers; the raw job log (GitHub's job-logs URL) can be downloaded and the blocks extracted with a script. `.gitattributes` keeps `tests/golden/**` LF for Windows.
+- **Formatting.** Several files predate rustfmt and have existing diffs; compare `rustfmt --check` hunk counts against `main` rather than reformatting whole files.
+- **Review.** CodeRabbit reviews PRs that are not drafts. It skips `docs/**` and auto-reviews only PRs into `staging` (comment `@coderabbitai review` on others). Its plan allows 5 reviews an hour.
+- **Stacked PRs.** Deleting a merged PR's branch closes the PRs that target it, so point stacked PRs at `main` before their base merges.
 
 ## The system today
 
