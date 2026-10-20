@@ -195,7 +195,7 @@ pub fn copy_png_to_clipboard(png_bytes: &[u8]) -> Result<()> {
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn copy_bundle_to_clipboard(bundle_dir: &Path) -> Result<()> {
     let (directory, bundle) = load_bundle(bundle_dir)?;
-    let summary = crate::sketch::summary_markdown(&bundle, &directory);
+    let summary = summary_markdown(&bundle, &directory);
     copy_string_to_clipboard(&summary)
 }
 
@@ -219,7 +219,7 @@ pub fn paste_bundle_image_and_text(bundle_dir: &Path) -> Result<()> {
     let (directory, bundle) = load_bundle(bundle_dir)?;
     let sheet_path = directory.join(&bundle.contact_sheet);
     let image = fs::read(&sheet_path).context("Could not read contact sheet")?;
-    let summary = crate::sketch::summary_markdown(&bundle, &directory);
+    let summary = summary_markdown(&bundle, &directory);
 
     crate::capture::wait_for_modifiers_released(350);
 
@@ -488,6 +488,26 @@ pub fn experiment(name: &str) -> bool {
         return overridden;
     }
     config().experiments.get(name).copied().unwrap_or(false)
+}
+
+/// What a bundle build reads from `config.json` and this process's experiments, so the pipeline
+/// (`crate::compile`) never reads config itself.
+pub fn build_options() -> crate::BuildOptions {
+    crate::BuildOptions {
+        agent_context: experiment(AGENT_CONTEXT),
+        autocrop: autocrop_settings(),
+    }
+}
+
+/// `"autocrop"` in `config.json`, read fresh each time.
+pub fn autocrop_settings() -> Option<crate::autocrop::Settings> {
+    let config = load_config_from(&default_config_path());
+    crate::autocrop::Settings::from_config(config.autocrop.as_ref())
+}
+
+/// `summary.md` for a bundle, with this process's `agentContext` experiment.
+pub fn summary_markdown(bundle: &ScrawlBundle, bundle_dir: &Path) -> String {
+    crate::sketch::summary_markdown_with(bundle, bundle_dir, experiment(AGENT_CONTEXT))
 }
 
 pub fn default_config_path() -> PathBuf {
@@ -1128,7 +1148,7 @@ pub fn resolve_opencode_session_with(
 /// Queues a bundle's summary and pointers into an OpenCode session.
 pub fn send_bundle_to_session(bundle_dir: &Path, session: &str) -> Result<()> {
     let (directory, bundle) = load_bundle(bundle_dir)?;
-    let summary = crate::sketch::summary_markdown(&bundle, &directory);
+    let summary = summary_markdown(&bundle, &directory);
     ensure!(
         session.starts_with("ses")
             && session

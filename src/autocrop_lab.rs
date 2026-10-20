@@ -439,6 +439,7 @@ pub fn build_fixture(
             autocrop: Some(Some(settings.unwrap_or_default())),
             ..Default::default()
         },
+        &crate::handoff::build_options(),
     )?;
     let truth = base.join("truth.json");
     if truth.is_file() {
@@ -650,6 +651,7 @@ pub fn simulate_capture(
                 .map(|v| crate::movie_keyframes(v, 0)),
             ..Default::default()
         },
+        &crate::handoff::build_options(),
     )?;
     let finish_ms = started.elapsed().as_millis() as u64;
     let full_dir = bundle

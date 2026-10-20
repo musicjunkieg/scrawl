@@ -242,10 +242,11 @@ impl Log {
 
 static LOG: Mutex<Log> = Mutex::new(Log { tabs: Vec::new() });
 
-pub fn record(origin: &str, post: Post) {
+/// `now_ms` is when the post arrived, in epoch milliseconds.
+pub fn record(origin: &str, post: Post, now_ms: u64) {
     LOG.lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .record(origin, post, crate::now_epoch_ms());
+        .record(origin, post, now_ms);
 }
 
 pub fn between(from: u64, to: u64) -> Vec<Event> {

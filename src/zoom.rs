@@ -275,6 +275,7 @@ pub fn zoom(
             &view.strokes,
             &view.marks,
             &view.events,
+            crate::handoff::experiment(crate::handoff::AGENT_CONTEXT),
         );
         crate::render::draw_time_label(frame, &clock(t), label_scale);
         cells.push((i + 1, t));

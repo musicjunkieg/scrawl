@@ -462,11 +462,6 @@ fn context_value(raw: &str) -> String {
     }
 }
 
-pub fn summary_markdown(bundle: &ScrawlBundle, bundle_dir: &std::path::Path) -> String {
-    let agent_context = crate::handoff::experiment(crate::handoff::AGENT_CONTEXT);
-    summary_markdown_with(bundle, bundle_dir, agent_context)
-}
-
 /// `agent_context` is the `agentContext` experiment (`agent_context::keyframe_texts`).
 pub fn summary_markdown_with(
     bundle: &ScrawlBundle,
@@ -1441,7 +1436,8 @@ mod tests {
         assert!(tl.find("0:04 · pressed").unwrap() < tl.find("0:05 ✎").unwrap());
         assert!(tl.contains("— frame #1"));
 
-        let summary = summary_markdown(&bundle, std::path::Path::new("/recordings/test"));
+        let summary =
+            summary_markdown_with(&bundle, std::path::Path::new("/recordings/test"), false);
         assert!(summary.starts_with("[scrawl 0:14 · App “Window” · /recordings/test]"));
         assert!(summary.contains("Note: Simplify it."));
         assert!(summary.contains("- #1 (0:05) “This row is too dense.”"));
@@ -1451,10 +1447,16 @@ mod tests {
         let mut silent = bundle.clone();
         silent.transcript = TranscriptData {
             source: "offline".into(),
-            missing: Some(crate::speech_model::missing("downloading", "en_US", None)),
+            missing: Some(MissingTranscript {
+                reason: "Apple's speech model (en_US) was still downloading. The audio is saved, \
+                         and Scrawl adds the transcript to this bundle when the download finishes."
+                    .into(),
+                retry: true,
+            }),
             ..Default::default()
         };
-        let summary = summary_markdown(&silent, std::path::Path::new("/recordings/test"));
+        let summary =
+            summary_markdown_with(&silent, std::path::Path::new("/recordings/test"), false);
         assert!(summary.contains(
             "No transcript: Apple's speech model (en_US) was still downloading. The audio is saved"
         ));
@@ -1509,7 +1511,8 @@ mod tests {
                 label: "Done tapped".into(),
             },
         ];
-        let summary = summary_markdown(&phone, std::path::Path::new("/recordings/phone"));
+        let summary =
+            summary_markdown_with(&phone, std::path::Path::new("/recordings/phone"), false);
         assert_eq!(
             summary,
             "[scrawl 0:14 · iPhone · dev.example.App (42) · /recordings/phone]\n\
@@ -1549,7 +1552,7 @@ mod tests {
             cursor: Some([0.50, 0.20]),
         });
         let summary_with_action =
-            summary_markdown(&phone, std::path::Path::new("/recordings/phone"));
+            summary_markdown_with(&phone, std::path::Path::new("/recordings/phone"), false);
         assert!(summary_with_action.contains("- #3 (0:11) [swiped up] “And then I scroll up.”"));
     }
 
@@ -1628,7 +1631,8 @@ mod tests {
             key: "server".into(),
             value: Some("mini".into()),
         }];
-        let summary = summary_markdown(&bundle, std::path::Path::new("/recordings/phone"));
+        let summary =
+            summary_markdown_with(&bundle, std::path::Path::new("/recordings/phone"), false);
         let session = format!("ses_{}…", "x".repeat(55));
         assert_eq!(
             summary,
@@ -1648,7 +1652,8 @@ mod tests {
         bundle.context.clear();
         bundle.context_changes.clear();
         bundle.device.as_mut().unwrap().app_short_version = None;
-        let summary = summary_markdown(&bundle, std::path::Path::new("/recordings/phone"));
+        let summary =
+            summary_markdown_with(&bundle, std::path::Path::new("/recordings/phone"), false);
         assert!(summary.starts_with(
             "[scrawl 0:25 · iPhone · OpenCode (354) · /recordings/phone]\n- #1 (0:01) “So here.”\n"
         ));
