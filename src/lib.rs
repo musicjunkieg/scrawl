@@ -570,6 +570,15 @@ const SKILL: &str = include_str!("../skills/scrawl/SKILL.md");
 
 /// Generates a rich, deterministic multi-frame demo bundle showcasing clicks, circles, arrows, pins, and aligned speech.
 pub fn generate_demo_bundle(out: Option<PathBuf>) -> Result<(PathBuf, ScrawlBundle, String)> {
+    generate_demo_bundle_with(out, &handoff::build_options())
+}
+
+/// `generate_demo_bundle` with the build options given instead of read from config (the golden
+/// test pins them).
+pub fn generate_demo_bundle_with(
+    out: Option<PathBuf>,
+    options: &BuildOptions,
+) -> Result<(PathBuf, ScrawlBundle, String)> {
     let bundle_dir = out.unwrap_or_else(|| {
         handoff::default_captures_dir().join(format!("{}.scrawl", make_bundle_id()))
     });
@@ -741,7 +750,7 @@ pub fn generate_demo_bundle(out: Option<PathBuf>) -> Result<(PathBuf, ScrawlBund
         None,
         Some("Header inset shifts on expand".into()),
         SourceExtras::default(),
-        &crate::handoff::build_options(),
+        options,
     )
 }
 
@@ -1629,6 +1638,7 @@ mod tests {
     use super::*;
     use crate::capture::write_bundle_artifacts;
     use crate::model::RgbaFrame;
+    use std::path::Path;
 
     #[test]
     fn artifact_failures_do_not_publish_a_manifest() {
@@ -1661,5 +1671,92 @@ mod tests {
         assert!(empty_frames.join("scrawl.json").exists());
         assert!(empty_frames.join("contact-sheet.png").exists());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The demo bundle's `scrawl.json` and `summary.md` against `tests/golden/<case>/`, so a
+    /// refactor of the pipeline can't change what agents read without a test saying so. The
+    /// creation time and the bundle's folder are blanked and floats rounded to 3 places, so the
+    /// files are the same on every platform. `SCRAWL_UPDATE_GOLDEN=1 cargo test golden` rewrites
+    /// them; review the diff before committing it.
+    #[test]
+    fn demo_bundle_matches_the_golden_files() {
+        for (case, agent_context) in [("demo", false), ("demo-agent-context", true)] {
+            let root = std::env::temp_dir().join(make_bundle_id());
+            let dir = root.join("demo.scrawl");
+            let options = BuildOptions {
+                agent_context,
+                autocrop: None,
+            };
+            generate_demo_bundle_with(Some(dir.clone()), &options).unwrap();
+            let json: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(dir.join("scrawl.json")).unwrap()).unwrap();
+            let json = serde_json::to_string_pretty(&golden_json(json)).unwrap() + "\n";
+            let summary = std::fs::read_to_string(dir.join("summary.md")).unwrap();
+            check_golden(case, "scrawl.json", &golden_paths(&json, &dir));
+            check_golden(case, "summary.md", &golden_paths(&summary, &dir));
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    fn golden_json(value: serde_json::Value) -> serde_json::Value {
+        use serde_json::Value;
+        match value {
+            Value::Object(map) => Value::Object(
+                map.into_iter()
+                    .map(|(k, v)| match k.as_str() {
+                        "createdAtMs" => (k, Value::from(0)),
+                        _ => (k, golden_json(v)),
+                    })
+                    .collect(),
+            ),
+            Value::Array(items) => Value::Array(items.into_iter().map(golden_json).collect()),
+            Value::Number(n) if n.is_f64() => {
+                let rounded = (n.as_f64().unwrap() * 1000.0).round() / 1000.0;
+                // `+ 0.0` turns -0.0 into 0.0.
+                serde_json::Number::from_f64(rounded + 0.0).map_or(Value::Null, Value::Number)
+            }
+            other => other,
+        }
+    }
+
+    /// The bundle's folder as `<bundle>`, with `/` between the parts of paths inside it on every
+    /// platform (Windows writes `\`, which `scrawl.json` escapes as `\\`).
+    fn golden_paths(text: &str, dir: &Path) -> String {
+        let mut out = text.to_owned();
+        let canonical = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+        for form in [canonical.display().to_string(), dir.display().to_string()] {
+            out = out.replace(&form.replace('\\', "\\\\"), "<bundle>");
+            out = out.replace(&form, "<bundle>");
+        }
+        out.lines()
+            .map(|line| {
+                if line.contains("<bundle>") {
+                    line.replace("\\\\", "/").replace('\\', "/")
+                } else {
+                    line.to_owned()
+                }
+            })
+            .map(|line| line + "\n")
+            .collect()
+    }
+
+    fn check_golden(case: &str, file: &str, actual: &str) {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/golden")
+            .join(case)
+            .join(file);
+        if std::env::var_os("SCRAWL_UPDATE_GOLDEN").is_some() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, actual).unwrap();
+            return;
+        }
+        let expected = std::fs::read_to_string(&path).unwrap_or_default();
+        if expected != actual {
+            panic!(
+                "{case}/{file} differs from {} (SCRAWL_UPDATE_GOLDEN=1 rewrites it)\n\
+                 ----- actual {case}/{file} -----\n{actual}----- end {case}/{file} -----",
+                path.display()
+            );
+        }
     }
 }
