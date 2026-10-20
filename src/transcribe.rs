@@ -124,6 +124,24 @@ pub fn set_override(engine: Engine) {
     );
 }
 
+/// The audio a transcriber hears: 16 kHz mono WAV, both on disk and in memory, so an engine
+/// can take whichever it needs.
+#[derive(Clone, Copy, Debug)]
+pub struct Speech<'a> {
+    pub wav_path: &'a Path,
+    pub wav_bytes: &'a [u8],
+    pub duration_ms: u64,
+}
+
+/// One engine that turns recorded speech into a transcript. Engines are tried in order
+/// (`transcribe_with`); one that returns `Ok(None)` (not connected, no model ready) or an error
+/// hands the recording to the next.
+pub trait Transcriber {
+    /// Names the engine in logs.
+    fn name(&self) -> &str;
+    fn transcribe(&mut self, speech: Speech<'_>) -> Result<Option<TranscriptData>>;
+}
+
 /// Missing microphones and a failed transcriber never prevent saving a bundle.
 pub fn transcribe(wav: Option<&Path>, audio: Option<&RecordedAudio>) -> TranscriptData {
     let (Some(wav), Some(audio)) = (wav, audio.filter(|audio| audio.sample_count > 0)) else {
@@ -132,101 +150,133 @@ pub fn transcribe(wav: Option<&Path>, audio: Option<&RecordedAudio>) -> Transcri
             ..Default::default()
         };
     };
-    let live = audio.live.take();
-    run(
-        Engine::preferred(),
-        || try_hex(audio),
-        || {
-            live.and_then(|live| finish_live(live, audio))
-                .unwrap_or_else(|| apple(wav))
-        },
-    )
-}
-
-/// The transcript made while recording, or `None` (logged) to transcribe the WAV instead.
-fn finish_live(
-    live: crate::live_transcribe::Live,
-    audio: &RecordedAudio,
-) -> Option<TranscriptData> {
-    match live.finish(&audio.wav_bytes) {
-        Ok(done) => {
-            crate::capture::scrawl_log(format!(
-                "Live transcription: {} words, {} of {} ms streamed, tail {} ms",
-                done.transcript.words.len(),
-                done.streamed_samples as u64 * 1_000 / 16_000,
-                audio.duration_ms,
-                done.tail_ms
-            ));
-            Some(done.transcript)
-        }
-        Err(error) => {
-            crate::capture::scrawl_log(format!(
-                "Live transcription failed, transcribing the recording: {error:#}"
-            ));
-            None
-        }
+    let speech = Speech {
+        wav_path: wav,
+        wav_bytes: &audio.wav_bytes,
+        duration_ms: audio.duration_ms,
+    };
+    let mut hex = Hex;
+    let mut live = Live(audio.live.take());
+    let mut local = Local;
+    let mut engines: Vec<&mut dyn Transcriber> = Vec::with_capacity(3);
+    if Engine::preferred() == Engine::Hex {
+        engines.push(&mut hex);
     }
+    engines.push(&mut live);
+    engines.push(&mut local);
+    transcribe_with(&mut engines, speech)
 }
 
-/// Hex first when preferred, with Apple as the answer to anything it can't do. `hex` returns
-/// `Ok(None)` when Hex isn't available at all (not connected, model not ready).
-fn run(
-    engine: Engine,
-    hex: impl FnOnce() -> Result<Option<TranscriptData>>,
-    apple: impl FnOnce() -> TranscriptData,
-) -> TranscriptData {
-    if engine == Engine::Hex {
-        match hex() {
+/// Asks each engine in turn and keeps the first transcript. If none answers, the bundle says why.
+pub fn transcribe_with(engines: &mut [&mut dyn Transcriber], speech: Speech<'_>) -> TranscriptData {
+    let mut failure = None;
+    for index in 0..engines.len() {
+        match engines[index].transcribe(speech) {
             Ok(Some(transcript)) => return transcript,
             Ok(None) => {}
-            Err(error) => crate::capture::scrawl_log(format!(
-                "Hex transcription failed, using {LOCAL_ENGINE_TITLE}: {error:#}"
-            )),
+            Err(error) => {
+                let name = engines[index].name().to_owned();
+                let next = engines.get(index + 1).map_or("nothing", |next| next.name());
+                crate::capture::scrawl_log(format!(
+                    "{name} transcription failed, using {next}: {error:#}"
+                ));
+                failure = Some(format!("{name} failed ({error:#})."));
+            }
         }
     }
-    apple()
+    TranscriptData {
+        source: "offline".into(),
+        missing: Some(crate::model::MissingTranscript {
+            reason: failure.unwrap_or_else(|| "No transcriber was available.".into()),
+            retry: false,
+        }),
+        ..Default::default()
+    }
 }
 
-fn try_hex(audio: &RecordedAudio) -> Result<Option<TranscriptData>> {
-    let not_connected = |reason: String| {
-        LOGGED_NOT_CONNECTED.call_once(|| {
-            crate::capture::scrawl_log(format!(
-                "Hex preferred but unavailable ({reason}); using {LOCAL_ENGINE_TITLE}"
-            ));
+/// Hex (`crate::hex`), when it is connected and has a model ready.
+pub struct Hex;
+
+impl Transcriber for Hex {
+    fn name(&self) -> &str {
+        "Hex"
+    }
+
+    fn transcribe(&mut self, speech: Speech<'_>) -> Result<Option<TranscriptData>> {
+        let not_connected = |reason: String| {
+            LOGGED_NOT_CONNECTED.call_once(|| {
+                crate::capture::scrawl_log(format!(
+                    "Hex preferred but unavailable ({reason}); using {LOCAL_ENGINE_TITLE}"
+                ));
+            });
+            Ok(None)
+        };
+        let client = match crate::hex::Client::connect() {
+            Ok(client) => client,
+            Err(error) => return not_connected(format!("{error:#}")),
+        };
+        let models = client.models()?;
+        let configured = crate::handoff::hex_model();
+        let Some(model) = crate::hex::pick_model(&models, configured.as_deref()) else {
+            return not_connected("no ready model".into());
+        };
+        crate::hex::transcribe_audio(&client, &model, speech.wav_bytes).map(Some)
+    }
+}
+
+/// The transcript made while recording (`crate::live_transcribe`), when one ran.
+pub struct Live(pub Option<crate::live_transcribe::Live>);
+
+impl Transcriber for Live {
+    fn name(&self) -> &str {
+        "Live"
+    }
+
+    fn transcribe(&mut self, speech: Speech<'_>) -> Result<Option<TranscriptData>> {
+        let Some(live) = self.0.take() else {
+            return Ok(None);
+        };
+        let done = live.finish(speech.wav_bytes)?;
+        crate::capture::scrawl_log(format!(
+            "Live transcription: {} words, {} of {} ms streamed, tail {} ms",
+            done.transcript.words.len(),
+            done.streamed_samples as u64 * 1_000 / 16_000,
+            speech.duration_ms,
+            done.tail_ms
+        ));
+        Ok(Some(done.transcript))
+    }
+}
+
+/// The on-device engine (`LOCAL_ENGINE_TITLE`). It always answers: a failure becomes a
+/// transcript that says why it is missing.
+pub struct Local;
+
+impl Transcriber for Local {
+    fn name(&self) -> &str {
+        LOCAL_ENGINE_TITLE
+    }
+
+    fn transcribe(&mut self, speech: Speech<'_>) -> Result<Option<TranscriptData>> {
+        let transcript = crate::helper::transcribe(speech.wav_path).unwrap_or_else(|error| {
+            crate::capture::scrawl_log(format!("{LOCAL_ENGINE_TITLE} failed: {error:#}"));
+            TranscriptData {
+                source: "offline".into(),
+                missing: Some(crate::model::MissingTranscript {
+                    reason: format!("Apple Speech failed ({error:#})."),
+                    retry: false,
+                }),
+                ..Default::default()
+            }
         });
-        Ok(None)
-    };
-    let client = match crate::hex::Client::connect() {
-        Ok(client) => client,
-        Err(error) => return not_connected(format!("{error:#}")),
-    };
-    let models = client.models()?;
-    let configured = crate::handoff::hex_model();
-    let Some(model) = crate::hex::pick_model(&models, configured.as_deref()) else {
-        return not_connected("no ready model".into());
-    };
-    crate::hex::transcribe_audio(&client, &model, audio).map(Some)
-}
-
-fn apple(wav: &Path) -> TranscriptData {
-    let transcript = crate::helper::transcribe(wav).unwrap_or_else(|error| {
-        crate::capture::scrawl_log(format!("{LOCAL_ENGINE_TITLE} failed: {error:#}"));
-        TranscriptData {
-            source: "offline".into(),
-            missing: Some(crate::model::MissingTranscript {
-                reason: format!("Apple Speech failed ({error:#})."),
-                retry: false,
-            }),
-            ..Default::default()
+        if let Some(missing) = &transcript.missing {
+            crate::capture::scrawl_log(format!("No transcript: {}", missing.reason));
+            if missing.retry {
+                crate::speech_model::ensure();
+            }
         }
-    });
-    if let Some(missing) = &transcript.missing {
-        crate::capture::scrawl_log(format!("No transcript: {}", missing.reason));
-        if missing.retry {
-            crate::speech_model::ensure();
-        }
+        Ok(Some(transcript))
     }
-    transcript
 }
 
 #[cfg(test)]
@@ -248,39 +298,74 @@ mod tests {
         assert_eq!(Engine::default(), Engine::Apple);
     }
 
-    #[test]
-    fn apple_preference_never_touches_hex() {
-        let result = run(
-            Engine::Apple,
-            || panic!("Hex must not be asked"),
-            || named("speech-analyzer"),
-        );
-        assert_eq!(result.source, "speech-analyzer");
+    /// A scripted engine: answers with `answer` and counts how often it was asked.
+    struct Fake {
+        answer: fn() -> Result<Option<TranscriptData>>,
+        asked: usize,
+    }
+
+    impl Fake {
+        fn new(answer: fn() -> Result<Option<TranscriptData>>) -> Self {
+            Self { answer, asked: 0 }
+        }
+    }
+
+    impl Transcriber for Fake {
+        fn name(&self) -> &str {
+            "Fake"
+        }
+
+        fn transcribe(&mut self, _: Speech<'_>) -> Result<Option<TranscriptData>> {
+            self.asked += 1;
+            (self.answer)()
+        }
+    }
+
+    fn speech() -> Speech<'static> {
+        Speech {
+            wav_path: Path::new("audio.wav"),
+            wav_bytes: &[],
+            duration_ms: 1_000,
+        }
     }
 
     #[test]
-    fn hex_is_used_when_it_answers() {
-        let result = run(
-            Engine::Hex,
-            || Ok(Some(named("hex:parakeet_v3"))),
-            || panic!("Apple must not be asked"),
-        );
+    fn the_first_engine_that_answers_wins() {
+        let mut hex = Fake::new(|| Ok(Some(named("hex:parakeet_v3"))));
+        let mut local = Fake::new(|| Ok(Some(named("speech-analyzer"))));
+        let result = transcribe_with(&mut [&mut hex, &mut local], speech());
         assert_eq!(result.source, "hex:parakeet_v3");
+        assert_eq!((hex.asked, local.asked), (1, 0));
     }
 
     #[test]
-    fn unavailable_or_failing_hex_falls_back_to_apple() {
-        let apple = || named("speech-analyzer");
+    fn unavailable_or_failing_engines_fall_through_to_the_next() {
+        let mut away = Fake::new(|| Ok(None));
+        let mut failing = Fake::new(|| Err(anyhow::anyhow!("Hex took too long")));
+        let mut local = Fake::new(|| Ok(Some(named("speech-analyzer"))));
+        let result = transcribe_with(&mut [&mut away, &mut failing, &mut local], speech());
+        assert_eq!(result.source, "speech-analyzer");
+        assert_eq!((away.asked, failing.asked, local.asked), (1, 1, 1));
+    }
+
+    #[test]
+    fn no_answer_is_a_missing_transcript_naming_the_last_failure() {
+        let mut failing = Fake::new(|| Err(anyhow::anyhow!("busy")));
+        let mut away = Fake::new(|| Ok(None));
+        let result = transcribe_with(&mut [&mut failing, &mut away], speech());
+        let missing = result.missing.expect("missing");
+        assert_eq!(missing.reason, "Fake failed (busy).");
+        assert!(!missing.retry);
+        let none = transcribe_with(&mut [], speech());
         assert_eq!(
-            run(Engine::Hex, || Ok(None), apple).source,
-            "speech-analyzer"
+            none.missing.unwrap().reason,
+            "No transcriber was available."
         );
-        let failed = run(
-            Engine::Hex,
-            || Err(anyhow::anyhow!("Hex took too long")),
-            apple,
-        );
-        assert_eq!(failed.source, "speech-analyzer");
+    }
+
+    #[test]
+    fn an_empty_live_slot_passes_without_finishing_anything() {
+        assert!(Live(None).transcribe(speech()).unwrap().is_none());
     }
 
     #[test]
