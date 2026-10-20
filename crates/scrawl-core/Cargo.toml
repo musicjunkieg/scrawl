@@ -1,0 +1,28 @@
+[package]
+name = "scrawl-core"
+version = "0.3.5"
+edition = "2024"
+license = "MIT"
+description = "Scrawl's bundle compiler: keyframes, ink, contact sheet and summary.md from a capture."
+
+[dependencies]
+anyhow = "1.0.104"
+png = "0.18.1"
+scrawl-bundle = { path = "../scrawl-bundle" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+
+[features]
+default = ["system-fonts"]
+# Text on frames in the system's fonts: Core Text on macOS, Arial (through `ab_glyph`) on Windows.
+# Without it, and on other systems (Linux, wasm), a built-in bitmap font, and the crate has no OS
+# bindings at all.
+system-fonts = ["dep:core-foundation", "dep:core-graphics", "dep:core-text", "dep:ab_glyph"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = { version = "0.10.0", optional = true }
+core-graphics = { version = "0.24.0", optional = true }
+core-text = { version = "21.0.0", optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+ab_glyph = { version = "0.2.32", optional = true }

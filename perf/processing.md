@@ -14,7 +14,7 @@ Check: `CARGO_TARGET_DIR=<isolated-target> taskpolicy -c utility cargo test -j 3
 The October 11, 2026 run used branch `perf/processing`, base `3810ac8`, an isolated worktree and APFS-cloned target directory. Build/test never touched the main checkout's target or UI files.
 
 ## Scope
-`src/render.rs`, `src/capture.rs`, `src/keyframes.rs`, `src/lib.rs`. UI and dependencies excluded.
+`crates/scrawl-core/src/render.rs`, `src/capture.rs`, `crates/scrawl-core/src/keyframes.rs`, `src/lib.rs`. UI and dependencies excluded.
 
 ## Hypotheses
 1. Faster PNG settings reduce serial encoding cost.

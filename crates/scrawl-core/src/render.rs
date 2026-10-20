@@ -1581,7 +1581,7 @@ fn wrap_text_indented(
     lines
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(feature = "system-fonts", target_os = "macos"))]
 mod native_text {
     use core_foundation::{
         attributed_string::CFMutableAttributedString,
@@ -1657,7 +1657,7 @@ mod native_text {
 }
 
 /// Arial (Windows' Helvetica) from the system fonts, through `ab_glyph`.
-#[cfg(target_os = "windows")]
+#[cfg(all(feature = "system-fonts", target_os = "windows"))]
 mod native_text {
     use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
     use std::sync::OnceLock;
@@ -1729,11 +1729,11 @@ mod native_text {
 }
 
 fn text_width(text: &str, size: f32, bold: bool) -> f32 {
-    #[cfg(target_os = "macos")]
+    #[cfg(all(feature = "system-fonts", target_os = "macos"))]
     if let Some((_, line)) = native_text::line(text, size, bold) {
         return line.get_typographic_bounds().width as f32;
     }
-    #[cfg(target_os = "windows")]
+    #[cfg(all(feature = "system-fonts", target_os = "windows"))]
     if let Some(width) = native_text::width(text, size, bold) {
         return width;
     }
@@ -1753,7 +1753,10 @@ fn draw_text(
     if text.is_empty() || size <= 0.0 {
         return;
     }
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(all(
+        feature = "system-fonts",
+        any(target_os = "macos", target_os = "windows")
+    ))]
     if let Some((width, height, pixels)) = native_text::mask(text, size, bold) {
         for py in 0..height {
             for px in 0..width {

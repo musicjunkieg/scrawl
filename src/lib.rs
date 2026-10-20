@@ -1,9 +1,7 @@
 //! Scrawl as a library. The `scrawl` binary (`src/main.rs`) is a thin wrapper over [`run`];
 //! see `docs/library.md` for how this crate is being split for other apps to embed.
 
-mod agent_context;
 mod audio;
-mod autocrop;
 // Windows looks elements up through UI Automation (`win/uia.rs`); other systems have no lookup.
 #[cfg_attr(
     not(any(target_os = "macos", target_os = "windows")),
@@ -23,24 +21,19 @@ mod hex;
 mod hold;
 mod icons;
 mod inbox;
-mod keyframes;
 #[cfg(target_os = "macos")]
 mod laser_overlay;
 mod live_transcribe;
 mod mic;
-mod model;
 mod native;
 mod onboarding;
 mod onboarding_window;
-mod page;
 mod phone;
-mod render;
 mod retention;
 mod routing;
 mod screens;
 mod settings;
 mod settings_window;
-mod sketch;
 #[cfg(target_os = "macos")]
 mod sparkle;
 mod speech_model;
@@ -51,6 +44,10 @@ mod web;
 mod win;
 mod windows;
 mod zoom;
+
+// The bundle format and compiler live in `crates/`; re-exported under their old module names.
+pub use scrawl_bundle as model;
+pub use scrawl_core::{agent_context, autocrop, keyframes, page, render, sketch};
 
 // The capture-to-bundle pipeline; re-exported so `crate::build_bundle_from_parts` etc. keep working.
 mod compile;

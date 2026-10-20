@@ -1,6 +1,6 @@
 # Scrawl as a library: plan
 
-Status: proposal, no code changed yet. Written 2026-10-19.
+Status: phases 1–5 done (the app is a library crate; `crates/scrawl-bundle` and `crates/scrawl-core` build on Linux and wasm32). Written 2026-10-19.
 
 Goal: any app can add Scrawl's capture-and-compile loop as a dependency, in three shapes:
 

@@ -293,7 +293,7 @@ records, Scrawl logs:
   counts.
 
 When the capture finishes, each keyframe gets the slice of the timeline halfway to its neighbours,
-and `src/autocrop.rs` weighs what happened in it: ink, clicks, drags and scrolls first, then where
+and `crates/scrawl-core/src/autocrop.rs` weighs what happened in it: ink, clicks, drags and scrolls first, then where
 the cursor rested and what changed on screen (a cursor wandering far from the ink is ignored). The
 crop is then:
 
