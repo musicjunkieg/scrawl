@@ -187,8 +187,8 @@ Total: about 21 working days. Phases 1–5 (about 5.5 days) deliver the Rust cra
 
 ## Decisions needed
 
-1. **Workspace vs `Cargo.toml` stability.** AGENTS.md asks to keep `Cargo.toml` and `Cargo.lock`
-   stable. Phase 5 needs a workspace. Phases 1–4 don't, so they can land first either way.
+1. ~~**Workspace vs `Cargo.toml` stability.**~~ Decided 2026-10-20: a multi-crate workspace is
+   fine. Phase 5 goes ahead as written.
 2. **Crate names on crates.io / npm scope.** `scrawl` and `@scrawl` may be taken.
 3. **Is OpenCode delivery part of the library story,** or app-only? This plan makes it optional.
 4. **Web transcription default:** none, Web Speech, or a hosted endpoint.
