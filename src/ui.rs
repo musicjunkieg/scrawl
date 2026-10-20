@@ -22,7 +22,7 @@ use platform::{
 #[cfg(target_os = "windows")]
 pub(crate) use platform::{gpui_display_for, hwnd_of, set_app_icon};
 
-use crate::audio::AudioRecorder;
+use crate::audio::{AudioCapture, AudioRecorder};
 use crate::capture::{
     LiveOverlayEvent, ScreenCaptureSession, SharedCaptureTelemetry, current_mouse_screen,
     discover_target, install_global_hotkeys, list_selectable_windows,
@@ -638,7 +638,7 @@ impl IslandPhase {
 enum CaptureSource {
     Screen {
         session: ScreenCaptureSession,
-        audio: Option<AudioRecorder>,
+        audio: Option<Box<dyn AudioCapture>>,
         /// Screen mode only: which windows were where, for `scrawl autocrop`.
         windows: Option<crate::windows::WindowLogger>,
     },
@@ -2579,7 +2579,9 @@ impl ScrawlCoordinator {
         });
         start_metric("metal_open_ms", stage);
         let stage = Instant::now();
-        let audio_recorder = AudioRecorder::start().ok();
+        let audio_recorder = AudioRecorder::start()
+            .ok()
+            .map(|recorder| Box::new(recorder) as Box<dyn AudioCapture>);
         start_metric("audio_start_ms", stage);
         let stage = Instant::now();
         let screen_session = ScreenCaptureSession::start(
