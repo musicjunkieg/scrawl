@@ -548,6 +548,15 @@ pub(crate) struct Sampler {
     pub video_offset_ms: Arc<AtomicU64>,
 }
 
+/// One screen recording in progress. `ScreenCaptureSession` records with the platform's capture
+/// API; another recorder only has to hand back a `ScreenRecording` when stopped.
+pub trait ScreenCapture: Send {
+    /// Takes a candidate frame now (a click or a mark) instead of at the next interval.
+    fn request_immediate_frame(&self);
+    fn elapsed_ms(&self) -> u64;
+    fn stop(self: Box<Self>) -> ScreenRecording;
+}
+
 /// Active screen + optional MP4 recorder (ScreenCaptureKit on macOS, Windows.Graphics.Capture
 /// and Media Foundation on Windows).
 pub struct ScreenCaptureSession {
@@ -645,6 +654,20 @@ impl ScreenCaptureSession {
             duration_ms: duration_ms.max(100),
             video_offset_ms: self.video_offset_ms.load(Ordering::Acquire),
         }
+    }
+}
+
+impl ScreenCapture for ScreenCaptureSession {
+    fn request_immediate_frame(&self) {
+        ScreenCaptureSession::request_immediate_frame(self);
+    }
+
+    fn elapsed_ms(&self) -> u64 {
+        ScreenCaptureSession::elapsed_ms(self)
+    }
+
+    fn stop(self: Box<Self>) -> ScreenRecording {
+        ScreenCaptureSession::stop(*self)
     }
 }
 
