@@ -1680,6 +1680,7 @@ mod tests {
     /// them; review the diff before committing it.
     #[test]
     fn demo_bundle_matches_the_golden_files() {
+        let mut differs = Vec::new();
         for (case, agent_context) in [("demo", false), ("demo-agent-context", true)] {
             let root = std::env::temp_dir().join(make_bundle_id());
             let dir = root.join("demo.scrawl");
@@ -1692,10 +1693,12 @@ mod tests {
                 serde_json::from_slice(&std::fs::read(dir.join("scrawl.json")).unwrap()).unwrap();
             let json = serde_json::to_string_pretty(&golden_json(json)).unwrap() + "\n";
             let summary = std::fs::read_to_string(dir.join("summary.md")).unwrap();
-            check_golden(case, "scrawl.json", &golden_paths(&json, &dir));
-            check_golden(case, "summary.md", &golden_paths(&summary, &dir));
+            for (file, actual) in [("scrawl.json", json), ("summary.md", summary)] {
+                differs.extend(check_golden(case, file, &golden_paths(&actual, &dir)));
+            }
             std::fs::remove_dir_all(root).unwrap();
         }
+        assert!(differs.is_empty(), "{}", differs.join("\n"));
     }
 
     fn golden_json(value: serde_json::Value) -> serde_json::Value {
@@ -1740,7 +1743,9 @@ mod tests {
             .collect()
     }
 
-    fn check_golden(case: &str, file: &str, actual: &str) {
+    /// `None` when `actual` matches the golden file, else a message with all of `actual`
+    /// between markers, so a run that can't write the files still shows what they should hold.
+    fn check_golden(case: &str, file: &str, actual: &str) -> Option<String> {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/golden")
             .join(case)
@@ -1748,15 +1753,15 @@ mod tests {
         if std::env::var_os("SCRAWL_UPDATE_GOLDEN").is_some() {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, actual).unwrap();
-            return;
+            return None;
         }
         let expected = std::fs::read_to_string(&path).unwrap_or_default();
-        if expected != actual {
-            panic!(
+        (expected != actual).then(|| {
+            format!(
                 "{case}/{file} differs from {} (SCRAWL_UPDATE_GOLDEN=1 rewrites it)\n\
                  ----- actual {case}/{file} -----\n{actual}----- end {case}/{file} -----",
                 path.display()
-            );
-        }
+            )
+        })
     }
 }
