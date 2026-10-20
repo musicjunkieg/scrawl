@@ -1153,11 +1153,8 @@ pub fn run() -> Result<()> {
                     Some(copied),
                     old.note,
                     SourceExtras {
-                        activity: windows::ActivityLog {
-                            windows: old.windows,
-                            cursor: old.cursor,
-                            ..Default::default()
-                        },
+                        windows: old.windows,
+                        cursor: old.cursor,
                         full_frames,
                         video_offset_ms: offset,
                         timings: StageTimings {
@@ -1633,8 +1630,8 @@ pub fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capture::write_bundle_artifacts;
     use crate::model::RgbaFrame;
+    use scrawl_core::build::write_bundle_artifacts;
     use std::path::Path;
 
     #[test]
@@ -1683,7 +1680,7 @@ mod tests {
             let dir = root.join("demo.scrawl");
             let options = BuildOptions {
                 agent_context,
-                autocrop: None,
+                ..BuildOptions::default()
             };
             generate_demo_bundle_with(Some(dir.clone()), &options).unwrap();
             let json: serde_json::Value =

@@ -496,6 +496,8 @@ pub fn build_options() -> crate::BuildOptions {
     crate::BuildOptions {
         agent_context: experiment(AGENT_CONTEXT),
         autocrop: autocrop_settings(),
+        created_at_ms: crate::now_epoch_ms(),
+        logger: Some(|message| crate::capture::scrawl_log(message)),
     }
 }
 
