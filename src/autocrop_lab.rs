@@ -15,7 +15,7 @@ use crate::model::{
     InteractionEvent, KeyframeReason, RgbaFrame, ScrawlBundle, Stroke, TargetInfo, TranscriptData,
     TranscriptSegment, WordTiming,
 };
-use crate::windows::{ActivityLog, CursorSample, WindowSnapshot};
+use crate::windows::{CursorSample, WindowSnapshot};
 
 fn decode(path: &Path) -> Result<RgbaFrame> {
     let file =
@@ -430,11 +430,8 @@ pub fn build_fixture(
         None,
         scenario.note,
         crate::SourceExtras {
-            activity: ActivityLog {
-                windows: scenario.windows,
-                cursor: scenario.cursor,
-                ..Default::default()
-            },
+            windows: scenario.windows,
+            cursor: scenario.cursor,
             full_frames: Some(Box::new(full_frames)),
             autocrop: Some(Some(settings.unwrap_or_default())),
             ..Default::default()
@@ -641,11 +638,8 @@ pub fn simulate_capture(
         video.clone(),
         None,
         crate::SourceExtras {
-            activity: ActivityLog {
-                windows,
-                cursor,
-                ..Default::default()
-            },
+            windows,
+            cursor,
             full_frames: video
                 .filter(|_| !legacy)
                 .map(|v| crate::movie_keyframes(v, 0)),

@@ -1,10 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-
-use anyhow::{Context, Result};
 
 use crate::model::{
     CaptureMode, InteractionEvent, RgbaFrame, SCALE, Stroke, TargetFrame, TargetInfo,
@@ -1405,48 +1403,6 @@ pub fn is_frontmost_terminal() -> bool {
     ]
     .iter()
     .any(|needle| a.contains(needle) || b.contains(needle))
-}
-
-/// Writes all bundle artifacts (`scrawl.json`, `summary.md`, `contact-sheet.png`, `frames/frame-XX.png`)
-/// into a new or specified `.scrawl` bundle directory.
-pub fn write_bundle_artifacts(
-    out_dir: &Path,
-    bundle: &crate::model::ScrawlBundle,
-    annotated_frames: &[(crate::model::Keyframe, RgbaFrame)],
-    contact_sheet: &RgbaFrame,
-    summary_md: &str,
-) -> Result<()> {
-    std::fs::create_dir_all(out_dir.join("frames"))
-        .with_context(|| format!("could not create {}", out_dir.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(out_dir, std::fs::Permissions::from_mode(0o700));
-    }
-
-    thread::scope(|scope| -> Result<()> {
-        let workers: Vec<_> = annotated_frames
-            .iter()
-            .map(|(kf, frame)| {
-                scope.spawn(move || -> Result<()> {
-                    crate::render::save_png(frame, &out_dir.join(&kf.file))
-                })
-            })
-            .collect();
-        crate::render::save_png(contact_sheet, &out_dir.join(&bundle.contact_sheet))?;
-        for worker in workers {
-            worker
-                .join()
-                .map_err(|_| anyhow::anyhow!("PNG encoding worker panicked"))??;
-        }
-        Ok(())
-    })?;
-
-    let manifest_bytes = serde_json::to_vec_pretty(bundle)?;
-    std::fs::write(out_dir.join("scrawl.json"), manifest_bytes)?;
-    std::fs::write(out_dir.join("summary.md"), summary_md.as_bytes())?;
-
-    Ok(())
 }
 
 #[cfg(test)]
