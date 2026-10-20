@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 
-use crate::audio::{self, RecordedAudio};
+use crate::audio;
 use crate::model::{TranscriptData, TranscriptSegment, WordTiming};
 
 /// Tried in this order when no model is configured. Anything else is the user's explicit pick.
@@ -551,12 +551,8 @@ pub fn transcribe_clips(
 }
 
 /// Transcribes a recording with `model`, as `transcribe_clips` over its speech islands.
-pub fn transcribe_audio(
-    client: &Client,
-    model: &str,
-    audio: &RecordedAudio,
-) -> Result<TranscriptData> {
-    let samples = audio::decode_wav_16k(&audio.wav_bytes)?;
+pub fn transcribe_audio(client: &Client, model: &str, wav_bytes: &[u8]) -> Result<TranscriptData> {
+    let samples = audio::decode_wav_16k(wav_bytes)?;
     let duration_ms = samples.len() as u64 / SAMPLE_RATE_KHZ;
     let mut clips = plan_clips(&audio::speech_islands(&samples), duration_ms);
     if clips.is_empty() && duration_ms >= MIN_ISLAND_MS * 4 {
@@ -903,13 +899,8 @@ mod tests {
         let mut samples = vec![0.0_f32; 16_000 * 6];
         samples[16_000..16_000 * 2].fill(0.2);
         samples[16_000 * 4..16_000 * 5].fill(0.2);
-        let audio = RecordedAudio {
-            sample_count: samples.len(),
-            duration_ms: 6_000,
-            wav_bytes: audio::encode_wav_16k(&samples).unwrap(),
-            live: Default::default(),
-        };
-        let transcript = transcribe_audio(&client(fake.port), "parakeet_v3", &audio).unwrap();
+        let wav = audio::encode_wav_16k(&samples).unwrap();
+        let transcript = transcribe_audio(&client(fake.port), "parakeet_v3", &wav).unwrap();
         assert_eq!(fake.requests.lock().unwrap().len(), 2);
         assert_eq!(transcript.words.len(), 6);
         assert!(
