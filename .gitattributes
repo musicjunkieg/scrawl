@@ -1,0 +1,3 @@
+# The golden test compares these byte for byte; keep them LF on every checkout (Windows CI
+# checks text out as CRLF).
+tests/golden/** text eol=lf
