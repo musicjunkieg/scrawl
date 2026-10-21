@@ -135,14 +135,8 @@ pub fn inputs() -> Inputs {
     Inputs { devices, default }
 }
 
-/// The cpal device for `id`, if connected.
-pub fn device(id: &str) -> Option<cpal::Device> {
-    use cpal::traits::{DeviceTrait, HostTrait};
-    cpal::default_host()
-        .input_devices()
-        .ok()?
-        .find(|device| device.id().is_ok_and(|d| d.id() == id))
-}
+// The cpal device for an id is `scrawl-capture`'s (`native::mic::device`).
+pub use scrawl_capture::native::mic::device;
 
 /// Logs a missing chosen device once, until it's back or another goes missing.
 pub fn note_pick(pick: &Pick) {
