@@ -1,6 +1,9 @@
 //! The macOS screen recorder: ScreenCaptureKit records the movie and takes the candidate
 //! frames, leaving out the recorder's own overlay windows and, when it can, macOS's own prompts.
 //! `run_sampler` is what `screen::Session::start` runs on macOS.
+//!
+//! ScreenCaptureKit is reached through Swift, so a binary that uses this needs the Swift runtime
+//! on its rpath (`-Wl,-rpath,/usr/lib/swift`, as this crate's `build.rs` adds for its tests).
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
