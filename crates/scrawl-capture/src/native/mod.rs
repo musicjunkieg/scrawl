@@ -3,6 +3,8 @@
 //! another system, the crate has no OS bindings.
 
 pub mod mic;
+#[cfg(target_os = "macos")]
+pub mod sck;
 #[cfg(target_os = "windows")]
 pub mod win;
 pub mod window_server;

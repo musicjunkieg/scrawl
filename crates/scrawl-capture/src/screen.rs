@@ -38,6 +38,48 @@ pub trait ScreenCapture: Send {
     fn stop(self: Box<Self>) -> ScreenRecording;
 }
 
+/// A rect in global points (or pixels on Windows): x, y, width, height.
+pub type Rect = [f64; 4];
+
+/// Global point → points from `screen`'s top-left corner.
+pub fn to_local(screen: Rect, p: [f64; 2]) -> [f64; 2] {
+    [p[0] - screen[0], p[1] - screen[1]]
+}
+
+/// The part of `r` on `screen`; `r` itself when they don't meet.
+pub fn clamp_to(r: Rect, screen: Rect) -> Rect {
+    let x0 = r[0].max(screen[0]);
+    let y0 = r[1].max(screen[1]);
+    let x1 = (r[0] + r[2]).min(screen[0] + screen[2]);
+    let y1 = (r[1] + r[3]).min(screen[1] + screen[3]);
+    if x1 > x0 && y1 > y0 {
+        [x0, y0, x1 - x0, y1 - y0]
+    } else {
+        r
+    }
+}
+
+/// `SCStreamConfiguration.sourceRect` for an area: points from its display's top-left corner,
+/// not global ones.
+pub fn source_rect(area: Rect, display: Rect) -> Rect {
+    let [x, y, w, h] = clamp_to(area, display);
+    let [lx, ly] = to_local(display, [x, y]);
+    [lx, ly, w, h]
+}
+
+/// The capture size for `target` with its long edge at most `long_edge` px, and at most
+/// `max_scale` pixels per unit of its frame (a 1x display isn't upscaled; on Windows frames are
+/// pixels already, so 1). Even, and at least 48 a side.
+pub fn capture_size(target: &TargetInfo, long_edge: f64, max_scale: f64) -> (u32, u32) {
+    let max_dim = target.frame.width.max(target.frame.height).max(1.0);
+    let native = target.frame.scale.clamp(1.0, max_scale);
+    let scale = (long_edge / max_dim).min(native);
+    (
+        ((target.frame.width * scale).round() as u32).max(48) & !1,
+        ((target.frame.height * scale).round() as u32).max(48) & !1,
+    )
+}
+
 /// The candidate frames of a capture, bounded in memory. When full it drops every other frame
 /// (keeping the first and the ones taken for a click, stroke or shortcut) and samples half as
 /// often from then on, so a long capture keeps its whole timeline, evenly, at a coarser step.
