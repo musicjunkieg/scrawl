@@ -1,0 +1,13 @@
+[package]
+name = "scrawl-capture"
+version = "0.3.5"
+edition = "2024"
+license = "MIT"
+description = "What a Scrawl capture records: traits for screen, audio, window-log and transcription sources, and the recordings they hand back."
+
+[dependencies]
+anyhow = "1.0.104"
+scrawl-bundle = { path = "../scrawl-bundle" }
+
+[dev-dependencies]
+serde_json = "1.0.151"

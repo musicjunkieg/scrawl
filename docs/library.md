@@ -1,6 +1,6 @@
 # Scrawl as a library: plan
 
-Status: phases 1–6a done; 6b (capture traits) is under way. See **Status and handoff** below. Written 2026-10-19.
+Status: phases 1–6a done; 6b (capture traits) is in its last step. See **Status and handoff** below. Written 2026-10-19.
 
 Goal: any app can add Scrawl's capture-and-compile loop as a dependency, in three shapes:
 
@@ -26,7 +26,7 @@ Updated 2026-10-20. Start here if you are picking this work up.
 | 6a | #8, #9 | `scrawl_core::build` (the whole bundle pipeline) and `scrawl_core::demo`; the golden test runs in the core |
 | Fix | #4 | `windows::tests::logger_snapshots_at_start_and_right_after_a_request` polls instead of sleeping |
 
-Another Rust app can already depend on `scrawl-core` and call `build::build_bundle_from_parts` with its own frames, strokes, events and transcript.
+Another Rust app can already depend on `scrawl-core` and call `build::build_bundle_from_parts` with its own frames, strokes, events and transcript, and implement `scrawl-capture`'s traits for its own sources.
 
 ### Next: phase 6b, capture traits
 
@@ -41,19 +41,20 @@ Goal: a `scrawl-capture` crate with traits for what the app records, and the mac
 - **`Transcriber` (#11, merged):** `transcribe::Transcriber` (`name`, `transcribe(Speech) -> Result<Option<TranscriptData>>`) with `Hex`, `Live` and `Local` as its implementations; `transcribe_with` tries engines in order (`Ok(None)` or an error passes to the next; none answering is a missing transcript). `Speech` carries the WAV path and bytes, so the trait no longer needs `RecordedAudio`; `hex::transcribe_audio` takes WAV bytes. 
 - **Audio (#12, merged):** `audio::AudioCapture` (`stop(self: Box<Self>) -> Result<RecordedAudio>`), implemented by `AudioRecorder`; the GPUI capture holds a `Box<dyn AudioCapture>`. `RecordedAudio.live` is now a `transcribe::Slot` holding any `Box<dyn Transcriber + Send>`, so `RecordedAudio` no longer names `live_transcribe`. Microphone choice (`mic`) and starting a recorder stay concrete for now. 
 - **Screen (#13, merged):** `capture::ScreenCapture` (`request_immediate_frame`, `elapsed_ms`, `stop(self: Box<Self>) -> ScreenRecording`), implemented by `ScreenCaptureSession`; the GPUI capture holds a `Box<dyn ScreenCapture>`. Starting a session, `discover_target`, and the per-platform sampler (`platform::run_sampler(Sampler)`) stay concrete.
-- **Window and cursor log (in review, branch `claude/window-log`):** `windows::ActivityCapture` (`stop(self: Box<Self>) -> ActivityLog`), implemented by `WindowLogger`; the GPUI capture holds a `Box<dyn ActivityCapture>`. `ActivityLog` (with its dedupe in `push_windows` / `push_cursor`) has no OS calls and can move as is. `scrawl record` still uses `WindowLogger` directly. `discover_target` stays a per-platform function: it answers once, before recording, so another app passes its own `TargetInfo` to `ScreenCaptureSession::start` instead of implementing a trait.
-- **Next:** decide whether the sampler is the better seam for other apps (they would supply only frame grabbing; `ScreenCaptureSession` keeps the candidate buffer and timing), then move the traits, `ActivityLog`, `RecordedAudio` and `ScreenRecording` into `crates/scrawl-capture`.
+- **Window and cursor log (#14, merged):** `windows::ActivityCapture` (`stop(self: Box<Self>) -> ActivityLog`), implemented by `WindowLogger`; the GPUI capture holds a `Box<dyn ActivityCapture>`. `ActivityLog` (with its dedupe in `push_windows` / `push_cursor`) has no OS calls and can move as is. `scrawl record` still uses `WindowLogger` directly. `discover_target` stays a per-platform function: it answers once, before recording, so another app passes its own `TargetInfo` to `ScreenCaptureSession::start` instead of implementing a trait.
+- **`crates/scrawl-capture` (in review, branch `claude/scrawl-capture`):** the four traits and what they hand back, with no OS calls: `transcribe::{Speech, Transcriber, Slot}`, `audio::{AudioCapture, RecordedAudio}`, `screen::{ScreenCapture, ScreenRecording}` and `activity::{ActivityCapture, ActivityLog}` (with its dedupe and tests). The app re-exports each under its old path (`crate::audio::RecordedAudio` and so on), so callers did not change; `Slot::live` became the app function `transcribe::live_slot`, since an app can't add inherent methods to a crate's type. CI tests the crate on Linux and builds it for wasm.
+- **Still in the app:** the implementations (`ScreenCaptureSession` and its per-platform sampler, `AudioRecorder` and `mic`, `WindowLogger`, the `Hex` / `Live` / `Local` engines) and `transcribe_with`. They lean on app pieces (`retention`, `scrawl_log`, `helper`, config), so moving them is its own phase. Before that, decide whether the sampler is the better seam for other apps (they would supply only frame grabbing; `ScreenCaptureSession` keeps the candidate buffer and timing).
 - **Linux doesn't type-check the app.** Name-resolution errors stop `cargo check` before type checking, so a type error in app code is invisible on Linux. To test a module that has no OS calls, include it in a scratch crate with `#[path = ".../src/<module>.rs"]` and stub its `crate::` neighbours.
 
 After 6b come phases 7 (`scrawl-route`), 8 (`scrawl-ffi` for ScrawlKit), 9 (ScrawlKit macOS) and 10 (`@scrawl/web`), as in **Phases** below.
 
 ### Working notes
 
-- **Linux can't build the app.** Its macOS/Windows code fails `cargo check` on Linux with about 113 error lines. Check a change by comparing the sorted error set (messages, without line numbers) of `cargo check -p scrawl --tests` against `main`: they must be identical. The crates build and test normally: `cargo test -p scrawl-bundle -p scrawl-core`, `cargo build -p scrawl-core --target wasm32-unknown-unknown`.
+- **Linux can't build the app.** Its macOS/Windows code fails `cargo check` on Linux with about 113 error lines. Check a change by comparing the sorted error set (messages, without line numbers) of `cargo check -p scrawl --tests` against `main`: they must be identical. The crates build and test normally: `cargo test -p scrawl-bundle -p scrawl-capture -p scrawl-core`, `cargo build -p scrawl-capture -p scrawl-core --target wasm32-unknown-unknown`.
 - **CI** (`.github/workflows/check.yml`) runs macOS, Windows and `Linux core and wasm`, about 5–15 minutes. It is the only real build of the app. Plain `cargo test` covers the crates through `default-members`.
 - **Golden files.** `SCRAWL_UPDATE_GOLDEN=1 cargo test -p scrawl-core golden` rewrites them (runs on Linux). If a change must alter them, review the diff. When files can only be made on CI, the test prints each mismatching file between `----- actual … -----` markers; the raw job log (GitHub's job-logs URL) can be downloaded and the blocks extracted with a script. `.gitattributes` keeps `tests/golden/**` LF for Windows.
 - **Formatting.** Several files predate rustfmt and have existing diffs; compare `rustfmt --check` hunk counts against `main` rather than reformatting whole files.
-- **Review.** CodeRabbit reviews PRs that are not drafts. It skips `docs/**` and auto-reviews only PRs into `staging` (comment `@coderabbitai review` on others). Its plan allows 5 reviews an hour.
+- **Review.** CodeRabbit reviews PRs that are not drafts, including PRs into `main`, on its own; an extra `@coderabbitai review` comment is skipped once it has seen the commit. It skips `docs/**`. Its plan allows 5 reviews an hour.
 - **Stacked PRs.** Deleting a merged PR's branch closes the PRs that target it, so point stacked PRs at `main` before their base merges.
 
 ## The system today

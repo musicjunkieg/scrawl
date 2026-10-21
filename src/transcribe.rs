@@ -4,7 +4,6 @@
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 
@@ -125,52 +124,11 @@ pub fn set_override(engine: Engine) {
     );
 }
 
-/// The audio a transcriber hears: 16 kHz mono WAV, both on disk and in memory, so an engine
-/// can take whichever it needs.
-#[derive(Clone, Copy, Debug)]
-pub struct Speech<'a> {
-    pub wav_path: &'a Path,
-    pub wav_bytes: &'a [u8],
-    pub duration_ms: u64,
-}
+pub use scrawl_capture::transcribe::{Slot, Speech, Transcriber};
 
-/// One engine that turns recorded speech into a transcript. Engines are tried in order
-/// (`transcribe_with`); one that returns `Ok(None)` (not connected, no model ready) or an error
-/// hands the recording to the next.
-pub trait Transcriber {
-    /// Names the engine in logs.
-    fn name(&self) -> &str;
-    fn transcribe(&mut self, speech: Speech<'_>) -> Result<Option<TranscriptData>>;
-}
-
-/// The engine that heard a recording while it was made, handed to `transcribe` with it. Copies of
-/// the recording share it; the first `take` gets it.
-#[derive(Clone, Default)]
-pub struct Slot(Arc<Mutex<Option<Box<dyn Transcriber + Send>>>>);
-
-impl Slot {
-    pub fn new(engine: Option<Box<dyn Transcriber + Send>>) -> Self {
-        Self(Arc::new(Mutex::new(engine)))
-    }
-
-    /// Holds a live transcription (`crate::live_transcribe`), if one ran.
-    pub fn live(live: Option<crate::live_transcribe::Live>) -> Self {
-        Self::new(live.map(|live| Box::new(Live(Some(live))) as Box<dyn Transcriber + Send>))
-    }
-
-    pub fn take(&self) -> Option<Box<dyn Transcriber + Send>> {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-    }
-}
-
-impl std::fmt::Debug for Slot {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let held = self.0.lock().map(|slot| slot.is_some()).unwrap_or(false);
-        f.debug_tuple("Slot").field(&held).finish()
-    }
+/// A slot holding a live transcription (`crate::live_transcribe`), if one ran.
+pub fn live_slot(live: Option<crate::live_transcribe::Live>) -> Slot {
+    Slot::new(live.map(|live| Box::new(Live(Some(live))) as Box<dyn Transcriber + Send>))
 }
 
 /// Missing microphones and a failed transcriber never prevent saving a bundle.
@@ -399,16 +357,6 @@ mod tests {
     #[test]
     fn an_empty_live_slot_passes_without_finishing_anything() {
         assert!(Live(None).transcribe(speech()).unwrap().is_none());
-    }
-
-    #[test]
-    fn copies_of_a_slot_share_one_engine() {
-        let slot = Slot::new(Some(Box::new(Fake::new(|| Ok(None)))));
-        let copy = slot.clone();
-        assert_eq!(format!("{slot:?}"), "Slot(true)");
-        assert!(copy.take().is_some());
-        assert!(slot.take().is_none());
-        assert!(Slot::default().take().is_none());
     }
 
     #[test]

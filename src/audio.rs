@@ -6,20 +6,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 const SAMPLE_RATE: u32 = 16_000;
 
-#[derive(Clone, Debug)]
-pub struct RecordedAudio {
-    pub sample_count: usize,
-    pub duration_ms: u64,
-    pub wav_bytes: Vec<u8>,
-    /// The engine that transcribed while recording, if one did (`live_transcribe`).
-    pub live: crate::transcribe::Slot,
-}
-
-/// One recording of the narration in progress. `AudioRecorder` records the microphone; another
-/// source only has to hand back 16 kHz mono WAV when stopped.
-pub trait AudioCapture: Send {
-    fn stop(self: Box<Self>) -> Result<RecordedAudio>;
-}
+pub use scrawl_capture::audio::{AudioCapture, RecordedAudio};
 
 pub struct AudioRecorder {
     worker: Option<std::thread::JoinHandle<Result<()>>>,
@@ -199,7 +186,7 @@ impl AudioRecorder {
             sample_count,
             duration_ms,
             wav_bytes,
-            live: crate::transcribe::Slot::live(self.live.take()),
+            live: crate::transcribe::live_slot(self.live.take()),
         })
     }
 }

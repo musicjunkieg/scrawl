@@ -4722,6 +4722,7 @@ dependencies = [
  "png 0.18.1",
  "raw-window-handle",
  "scrawl-bundle",
+ "scrawl-capture",
  "scrawl-core",
  "screencapturekit",
  "serde",
@@ -4736,6 +4737,15 @@ name = "scrawl-bundle"
 version = "0.3.5"
 dependencies = [
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "scrawl-capture"
+version = "0.3.5"
+dependencies = [
+ "anyhow",
+ "scrawl-bundle",
  "serde_json",
 ]
 
