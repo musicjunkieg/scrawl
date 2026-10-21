@@ -677,7 +677,7 @@ pub fn run() -> Result<()> {
                 std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             );
             let window_log = (target.mode == CaptureMode::Display).then(|| {
-                windows::WindowLogger::start(
+                windows::start_logger(
                     target.frame,
                     std::time::Instant::now(),
                     std::sync::Arc::default(),

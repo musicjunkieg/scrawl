@@ -2597,7 +2597,7 @@ impl ScrawlCoordinator {
                 .started_at
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            Box::new(crate::windows::WindowLogger::start(
+            Box::new(crate::windows::start_logger(
                 target.frame,
                 started_at,
                 Arc::clone(&self.telemetry.window_log_request),
