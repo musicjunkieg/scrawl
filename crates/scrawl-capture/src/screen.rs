@@ -69,10 +69,10 @@ pub fn source_rect(area: Rect, display: Rect) -> Rect {
 
 /// The capture size for `target` with its long edge at most `long_edge` px, and at most
 /// `max_scale` pixels per unit of its frame (a 1x display isn't upscaled; on Windows frames are
-/// pixels already, so 1). Even, and at least 48 a side.
+/// pixels already, so 1; below 1 or NaN counts as 1). Even, and at least 48 a side.
 pub fn capture_size(target: &TargetInfo, long_edge: f64, max_scale: f64) -> (u32, u32) {
     let max_dim = target.frame.width.max(target.frame.height).max(1.0);
-    let native = target.frame.scale.clamp(1.0, max_scale);
+    let native = target.frame.scale.clamp(1.0, max_scale.max(1.0));
     let scale = (long_edge / max_dim).min(native);
     (
         ((target.frame.width * scale).round() as u32).max(48) & !1,
@@ -395,5 +395,28 @@ mod tests {
         buffer.push(RgbaFrame::new(500, 4, 4, vec![0; 64]), false);
         buffer.drop_since(0);
         assert_eq!(buffer.len(), 1);
+    }
+
+    #[test]
+    fn capture_size_treats_a_scale_limit_below_one_as_one() {
+        use crate::model::{CaptureMode, TargetFrame};
+        let target = TargetInfo {
+            mode: CaptureMode::Display,
+            app: None,
+            bundle_id: None,
+            window_title: None,
+            window_id: None,
+            display_id: 1,
+            frame: TargetFrame {
+                x: 0.0,
+                y: 0.0,
+                width: 1728.0,
+                height: 1117.0,
+                scale: 2.0,
+            },
+        };
+        assert_eq!(capture_size(&target, 2560.0, 2.0), (2560, 1654));
+        assert_eq!(capture_size(&target, 2560.0, 0.5), (1728, 1116));
+        assert_eq!(capture_size(&target, 2560.0, f64::NAN), (1728, 1116));
     }
 }
