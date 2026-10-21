@@ -8,24 +8,17 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::sync::atomic::AtomicBool;
+use std::time::Instant;
 
 use crate::model::TargetFrame;
-
-/// How often the worker wakes to sample the cursor and check its triggers.
-const TICK: Duration = Duration::from_millis(66);
-/// Snapshots while the cursor moves are at most this often (about 2 Hz).
-const MOVING_INTERVAL: Duration = Duration::from_millis(500);
-/// A snapshot even when nothing seems to happen, to catch windows opening without input.
-const IDLE_INTERVAL: Duration = Duration::from_millis(2_000);
 
 // The window and cursor types are bundle format; they live in `model` so the bundle compiler
 // doesn't depend on this capture-side module.
 pub use crate::model::{CursorSample, WindowEntry, WindowSnapshot};
 pub use scrawl_capture::activity::{
-    ActivityCapture, ActivityLog, AppMeta, RawWindow, filter_windows, owned_window_at,
+    ActivityCapture, ActivityLog, AppMeta, RawWindow, WindowLogger, WindowSource, filter_windows,
+    owned_window_at,
 };
 #[cfg(target_os = "macos")]
 pub use scrawl_capture::activity::{macos_is_asking, system_prompt_at, system_prompts_over};
@@ -286,117 +279,59 @@ pub fn snapshot(
     })
 }
 
-/// Background worker that logs windows and the cursor during a Screen-mode capture.
-///
-/// Snapshots are taken at the start, right after `request` is raised (click, ink or laser
-/// start), when the frontmost app changes, at most every 500 ms while the cursor moves, every
-/// 2 s otherwise, and once more at the end. Cursor samples are taken at 15 Hz.
-pub struct WindowLogger {
-    stopping: Arc<AtomicBool>,
-    worker: Option<JoinHandle<ActivityLog>>,
-}
-
-impl WindowLogger {
-    /// Call on the main thread, so the Dock's strip can be read from `NSScreen`.
-    pub fn start(frame: TargetFrame, started_at: Instant, request: Arc<AtomicBool>) -> Self {
-        let stopping = Arc::new(AtomicBool::new(false));
-        let stop = Arc::clone(&stopping);
-        let dock = dock_rect(frame);
-        let worker = thread::Builder::new()
-            .name("scrawl-window-log".into())
-            .spawn(move || run(frame, dock, started_at, &request, &stop))
-            .ok();
-        Self { stopping, worker }
-    }
-
-    pub fn stop(mut self) -> ActivityLog {
-        self.stopping.store(true, Ordering::Release);
-        let log = self
-            .worker
-            .take()
-            .and_then(|w| {
-                w.thread().unpark();
-                w.join().ok()
-            })
-            .unwrap_or_default();
-        if log.snapshot_calls > 0 {
-            crate::capture::scrawl_log(format!(
-                "Window log: {} snapshots taken, {} stored, {:.2} ms each; {} cursor samples",
-                log.snapshot_calls,
-                log.windows.len(),
-                log.snapshot_time.as_secs_f64() * 1_000.0 / f64::from(log.snapshot_calls),
-                log.cursor.len()
-            ));
-        }
-        log
-    }
-}
-
-impl ActivityCapture for WindowLogger {
-    fn stop(self: Box<Self>) -> ActivityLog {
-        WindowLogger::stop(*self)
-    }
-}
-
-impl Drop for WindowLogger {
-    fn drop(&mut self) {
-        self.stopping.store(true, Ordering::Release);
-        if let Some(ref w) = self.worker {
-            w.thread().unpark();
-        }
-    }
-}
-
-fn run(
+/// The window server, as `WindowLogger` reads it: the cursor, the frontmost app other than
+/// Scrawl, and `snapshot` with the Dock's strip and the app details cached.
+pub struct ServerWindows {
     frame: TargetFrame,
     dock: Option<[f64; 4]>,
-    started_at: Instant,
-    request: &AtomicBool,
-    stopping: &AtomicBool,
-) -> ActivityLog {
-    let mut log = ActivityLog::default();
-    let mut cache = HashMap::new();
-    let mut last_snapshot: Option<Instant> = None;
-    let mut last_front = None;
-    let mut cursor_at_snapshot: Option<[f32; 2]> = None;
-    let mut take = |log: &mut ActivityLog, t: u64| {
-        let began = Instant::now();
-        let windows = snapshot(frame, dock, &mut cache);
-        log.snapshot_calls += 1;
-        log.snapshot_time += began.elapsed();
-        log.push_windows(t, windows);
-    };
-    loop {
-        let finishing = stopping.load(Ordering::Acquire);
-        let t = started_at.elapsed().as_millis() as u64;
-        let cursor = crate::capture::current_mouse_screen();
-        if let Some([x, y]) = cursor {
-            log.push_cursor(t, f64::from(x) - frame.x, f64::from(y) - frame.y, frame);
+    cache: HashMap<i32, AppMeta>,
+}
+
+impl ServerWindows {
+    /// Call on the main thread, so the Dock's strip can be read from `NSScreen`.
+    pub fn new(frame: TargetFrame) -> Self {
+        Self {
+            frame,
+            dock: dock_rect(frame),
+            cache: HashMap::new(),
         }
-        let front = crate::capture::frontmost_external_pid();
-        let since = last_snapshot.map(|s| s.elapsed());
-        let moved = cursor != cursor_at_snapshot;
-        let due = !finishing
-            && (since.is_none()
-                || request.swap(false, Ordering::AcqRel)
-                || front != last_front
-                || (moved && since.is_some_and(|s| s >= MOVING_INTERVAL))
-                || since.is_some_and(|s| s >= IDLE_INTERVAL));
-        if due {
-            take(&mut log, t);
-            last_snapshot = Some(Instant::now());
-            last_front = front;
-            cursor_at_snapshot = cursor;
-        }
-        if finishing {
-            return log;
-        }
-        thread::park_timeout(TICK);
     }
+}
+
+impl WindowSource for ServerWindows {
+    fn cursor(&mut self) -> Option<[f32; 2]> {
+        crate::capture::current_mouse_screen()
+    }
+
+    fn frontmost_pid(&mut self) -> Option<i32> {
+        crate::capture::frontmost_external_pid()
+    }
+
+    fn windows(&mut self) -> Vec<WindowEntry> {
+        snapshot(self.frame, self.dock, &mut self.cache)
+    }
+
+    fn log(&mut self, line: &str) {
+        crate::capture::scrawl_log(line);
+    }
+}
+
+/// Starts logging the window server for a capture of `frame` (see `WindowLogger`). Call on the
+/// main thread.
+pub fn start_logger(
+    frame: TargetFrame,
+    started_at: Instant,
+    request: Arc<AtomicBool>,
+) -> WindowLogger {
+    WindowLogger::start(ServerWindows::new(frame), frame, started_at, request)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::Ordering;
+    use std::thread;
+    use std::time::Duration;
+
     use super::*;
 
     fn frame() -> TargetFrame {
@@ -412,7 +347,7 @@ mod tests {
     #[test]
     fn logger_snapshots_at_start_and_right_after_a_request() {
         let request = Arc::new(AtomicBool::new(false));
-        let logger = WindowLogger::start(frame(), Instant::now(), Arc::clone(&request));
+        let logger = start_logger(frame(), Instant::now(), Arc::clone(&request));
         thread::sleep(Duration::from_millis(150));
         request.store(true, Ordering::Release);
         // A snapshot can take well over a tick on a busy CI runner, so wait for the worker to

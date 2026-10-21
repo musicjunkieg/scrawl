@@ -3,12 +3,21 @@
 //! were about. Snapshots are stored only when the window list changes and cursor samples only
 //! when the cursor moves.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::model::{CursorSample, TargetFrame, WindowEntry, WindowSnapshot};
 
 /// Cursor samples closer than this to the previous one (in capture points) are dropped.
 const CURSOR_MIN_MOVE_PT: f64 = 2.0;
+/// How often the worker wakes to sample the cursor and check its triggers.
+const TICK: Duration = Duration::from_millis(66);
+/// Snapshots while the cursor moves are at most this often (about 2 Hz).
+const MOVING_INTERVAL: Duration = Duration::from_millis(500);
+/// A snapshot even when nothing seems to happen, to catch windows opening without input.
+const IDLE_INTERVAL: Duration = Duration::from_millis(2_000);
 
 /// What the worker collected over one capture.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -62,10 +71,130 @@ fn round4(v: f64) -> f32 {
     ((v * 10_000.0).round() / 10_000.0) as f32
 }
 
-/// One window and cursor log in progress. The app's `WindowLogger` reads the window server;
-/// another source only has to hand back an `ActivityLog` when stopped.
+/// One window and cursor log in progress. `WindowLogger` samples a `WindowSource`; another
+/// log only has to hand back an `ActivityLog` when stopped.
 pub trait ActivityCapture: Send {
     fn stop(self: Box<Self>) -> ActivityLog;
+}
+
+/// What `WindowLogger` reads on each tick: the app's window server reads on macOS and Windows,
+/// or a fake in tests.
+pub trait WindowSource: Send + 'static {
+    /// The cursor in global points.
+    fn cursor(&mut self) -> Option<[f32; 2]>;
+    /// The frontmost app other than the recorder itself.
+    fn frontmost_pid(&mut self) -> Option<i32>;
+    /// The windows over the capture, front to back, in capture points (see `filter_windows`).
+    fn windows(&mut self) -> Vec<WindowEntry>;
+    /// Where the logger's one line about a finished log goes.
+    fn log(&mut self, _line: &str) {}
+}
+
+/// Background worker that logs windows and the cursor during a Screen-mode capture.
+///
+/// Snapshots are taken at the start, right after `request` is raised (click, ink or laser
+/// start), when the frontmost app changes, at most every 500 ms while the cursor moves, every
+/// 2 s otherwise, and once more at the end. Cursor samples are taken at 15 Hz.
+pub struct WindowLogger {
+    stopping: Arc<AtomicBool>,
+    worker: Option<JoinHandle<ActivityLog>>,
+}
+
+impl WindowLogger {
+    /// Starts sampling `source` for a capture of `frame` that began at `started_at`.
+    pub fn start(
+        source: impl WindowSource,
+        frame: TargetFrame,
+        started_at: Instant,
+        request: Arc<AtomicBool>,
+    ) -> Self {
+        let stopping = Arc::new(AtomicBool::new(false));
+        let stop = Arc::clone(&stopping);
+        let worker = thread::Builder::new()
+            .name("scrawl-window-log".into())
+            .spawn(move || run(source, frame, started_at, &request, &stop))
+            .ok();
+        Self { stopping, worker }
+    }
+
+    pub fn stop(mut self) -> ActivityLog {
+        self.stopping.store(true, Ordering::Release);
+        self.worker
+            .take()
+            .and_then(|w| {
+                w.thread().unpark();
+                w.join().ok()
+            })
+            .unwrap_or_default()
+    }
+}
+
+impl ActivityCapture for WindowLogger {
+    fn stop(self: Box<Self>) -> ActivityLog {
+        WindowLogger::stop(*self)
+    }
+}
+
+impl Drop for WindowLogger {
+    fn drop(&mut self) {
+        self.stopping.store(true, Ordering::Release);
+        if let Some(ref w) = self.worker {
+            w.thread().unpark();
+        }
+    }
+}
+
+fn run(
+    mut source: impl WindowSource,
+    frame: TargetFrame,
+    started_at: Instant,
+    request: &AtomicBool,
+    stopping: &AtomicBool,
+) -> ActivityLog {
+    let mut log = ActivityLog::default();
+    let mut last_snapshot: Option<Instant> = None;
+    let mut last_front = None;
+    let mut cursor_at_snapshot: Option<[f32; 2]> = None;
+    loop {
+        let finishing = stopping.load(Ordering::Acquire);
+        let t = started_at.elapsed().as_millis() as u64;
+        let cursor = source.cursor();
+        if let Some([x, y]) = cursor {
+            log.push_cursor(t, f64::from(x) - frame.x, f64::from(y) - frame.y, frame);
+        }
+        let front = source.frontmost_pid();
+        let since = last_snapshot.map(|s| s.elapsed());
+        let moved = cursor != cursor_at_snapshot;
+        let due = !finishing
+            && (since.is_none()
+                || request.swap(false, Ordering::AcqRel)
+                || front != last_front
+                || (moved && since.is_some_and(|s| s >= MOVING_INTERVAL))
+                || since.is_some_and(|s| s >= IDLE_INTERVAL));
+        if due {
+            let began = Instant::now();
+            let windows = source.windows();
+            log.snapshot_calls += 1;
+            log.snapshot_time += began.elapsed();
+            log.push_windows(t, windows);
+            last_snapshot = Some(Instant::now());
+            last_front = front;
+            cursor_at_snapshot = cursor;
+        }
+        if finishing {
+            if log.snapshot_calls > 0 {
+                source.log(&format!(
+                    "Window log: {} snapshots taken, {} stored, {:.2} ms each; {} cursor samples",
+                    log.snapshot_calls,
+                    log.windows.len(),
+                    log.snapshot_time.as_secs_f64() * 1_000.0 / f64::from(log.snapshot_calls),
+                    log.cursor.len()
+                ));
+            }
+            return log;
+        }
+        thread::park_timeout(TICK);
+    }
 }
 
 /// One window as the window server reported it, in global points.
@@ -423,5 +552,64 @@ mod tests {
             settings[0].clone(),
         ];
         assert!(!macos_is_asking(&behind));
+    }
+
+    /// A window server with one window and a still cursor, counting its snapshots.
+    struct Fake {
+        snapshots: Arc<std::sync::atomic::AtomicU32>,
+        lines: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl WindowSource for Fake {
+        fn cursor(&mut self) -> Option<[f32; 2]> {
+            Some([500.0, 250.0])
+        }
+
+        fn frontmost_pid(&mut self) -> Option<i32> {
+            Some(1)
+        }
+
+        fn windows(&mut self) -> Vec<WindowEntry> {
+            self.snapshots.fetch_add(1, Ordering::AcqRel);
+            vec![entry(1, 0)]
+        }
+
+        fn log(&mut self, line: &str) {
+            self.lines.lock().unwrap().push(line.to_owned());
+        }
+    }
+
+    #[test]
+    fn logger_snapshots_at_start_and_right_after_a_request() {
+        let snapshots = Arc::default();
+        let lines = Arc::default();
+        let source = Fake {
+            snapshots: Arc::clone(&snapshots),
+            lines: Arc::clone(&lines),
+        };
+        let request = Arc::new(AtomicBool::new(false));
+        let logger = WindowLogger::start(source, frame(), Instant::now(), Arc::clone(&request));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while snapshots.load(Ordering::Acquire) == 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        request.store(true, Ordering::Release);
+        while request.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!request.load(Ordering::Acquire), "the request was taken");
+        let log = logger.stop();
+        assert!(log.snapshot_calls >= 2, "{} snapshots", log.snapshot_calls);
+        assert_eq!(log.windows.len(), 1, "the same list is stored once");
+        // A still cursor is one sample.
+        assert_eq!(log.cursor.len(), 1);
+        assert_eq!((log.cursor[0].1, log.cursor[0].2), (0.5, 0.5));
+        let lines = lines.lock().unwrap();
+        assert_eq!(lines.len(), 1);
+        assert!(
+            lines[0].contains("snapshots taken, 1 stored"),
+            "{}",
+            lines[0]
+        );
     }
 }
