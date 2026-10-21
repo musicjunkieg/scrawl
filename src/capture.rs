@@ -12,8 +12,6 @@ use crate::model::{CaptureMode, InteractionEvent, SCALE, Stroke, TargetFrame, Ta
 mod platform;
 pub use platform::*;
 
-#[cfg(target_os = "windows")]
-pub use scrawl_capture::screen::CANDIDATE_EDGE_NO_VIDEO;
 pub use scrawl_capture::screen::{
     CANDIDATE_BUDGET_BYTES, CANDIDATE_EDGE, CandidateBuffer, FRAME_SAMPLE_INTERVAL, Sampler,
     ScreenCapture, ScreenRecording,

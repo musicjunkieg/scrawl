@@ -1000,7 +1000,7 @@ pub fn frontmost_app_info() -> Option<(i32, String, Option<String>)> {
 pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
     scrawl_capture::native::sck::run_sampler(
         sampler,
-        scrawl_capture::native::sck::SckHooks {
+        scrawl_capture::native::SamplerHooks {
             log: Some(|line| scrawl_log(line)),
             ready: Some(|started_at| crate::ui::start_metric("sck_ready_ms", started_at)),
             placeholder: |t_ms, phase| {
