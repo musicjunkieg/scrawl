@@ -264,3 +264,93 @@ pub fn snapshot(
         )
     })
 }
+
+/// The cursor in global points (macOS) or pixels (Windows).
+#[cfg(target_os = "macos")]
+pub fn cursor() -> Option<[f32; 2]> {
+    use core_graphics::event::CGEvent;
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState).ok()?;
+    let point = CGEvent::new(source).ok()?.location();
+    Some([point.x as f32, point.y as f32])
+}
+
+/// The cursor in global points (macOS) or pixels (Windows).
+#[cfg(target_os = "windows")]
+pub fn cursor() -> Option<[f32; 2]> {
+    crate::native::win::cursor_position().map(|(x, y)| [x as f32, y as f32])
+}
+
+/// The frontmost app's process, unless it is this process.
+#[cfg(target_os = "macos")]
+pub fn frontmost_pid() -> Option<i32> {
+    use objc2_app_kit::NSWorkspace;
+    let pid = NSWorkspace::sharedWorkspace()
+        .frontmostApplication()?
+        .processIdentifier();
+    (pid > 0 && pid != std::process::id() as i32).then_some(pid)
+}
+
+/// The frontmost app's process, unless it is this process.
+#[cfg(target_os = "windows")]
+pub fn frontmost_pid() -> Option<i32> {
+    let front = crate::native::win::foreground_window()?;
+    (front.pid != std::process::id()).then_some(front.pid as i32)
+}
+
+/// The window server as a `WindowSource`: `cursor`, `frontmost_pid` and `snapshot`, with the
+/// Dock's strip read once and each app's details cached.
+pub struct NativeWindows {
+    frame: TargetFrame,
+    dock: Option<[f64; 4]>,
+    cache: HashMap<i32, AppMeta>,
+    frontmost: fn() -> Option<i32>,
+    log: Option<fn(&str)>,
+}
+
+impl NativeWindows {
+    /// The windows over a capture of `frame`. Call on the main thread, so the Dock's strip can
+    /// be read from `NSScreen` on macOS.
+    pub fn new(frame: TargetFrame) -> Self {
+        Self {
+            frame,
+            dock: dock_rect(frame),
+            cache: HashMap::new(),
+            frontmost: frontmost_pid,
+            log: None,
+        }
+    }
+
+    /// Asks `frontmost` which app is in front instead (for one that remembers the app that was
+    /// in front before the recorder's own window took focus).
+    pub fn with_frontmost(mut self, frontmost: fn() -> Option<i32>) -> Self {
+        self.frontmost = frontmost;
+        self
+    }
+
+    /// Sends the logger's closing line to `log`.
+    pub fn with_log(mut self, log: fn(&str)) -> Self {
+        self.log = Some(log);
+        self
+    }
+}
+
+impl crate::activity::WindowSource for NativeWindows {
+    fn cursor(&mut self) -> Option<[f32; 2]> {
+        cursor()
+    }
+
+    fn frontmost_pid(&mut self) -> Option<i32> {
+        (self.frontmost)()
+    }
+
+    fn windows(&mut self) -> Vec<WindowEntry> {
+        snapshot(self.frame, self.dock, (self.frontmost)(), &mut self.cache)
+    }
+
+    fn log(&mut self, line: &str) {
+        if let Some(log) = self.log {
+            log(line);
+        }
+    }
+}

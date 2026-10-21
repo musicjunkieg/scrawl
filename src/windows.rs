@@ -17,13 +17,12 @@ use crate::model::TargetFrame;
 // doesn't depend on this capture-side module.
 pub use crate::model::{CursorSample, WindowEntry, WindowSnapshot};
 pub use scrawl_capture::activity::{
-    ActivityCapture, ActivityLog, AppMeta, RawWindow, WindowLogger, WindowSource, filter_windows,
-    owned_window_at,
+    ActivityCapture, ActivityLog, AppMeta, RawWindow, WindowLogger, filter_windows, owned_window_at,
 };
 #[cfg(target_os = "macos")]
 pub use scrawl_capture::activity::{macos_is_asking, system_prompt_at, system_prompts_over};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-pub use scrawl_capture::native::window_server::{dock_rect, raw_windows};
+pub use scrawl_capture::native::window_server::{NativeWindows, dock_rect, raw_windows};
 
 /// One timed snapshot of the windows overlapping `frame`, with the frontmost app other than
 /// Scrawl marked (`capture::frontmost_external_pid`).
@@ -41,51 +40,18 @@ pub fn snapshot(
     )
 }
 
-/// The window server, as `WindowLogger` reads it: the cursor, the frontmost app other than
-/// Scrawl, and `snapshot` with the Dock's strip and the app details cached.
-pub struct ServerWindows {
-    frame: TargetFrame,
-    dock: Option<[f64; 4]>,
-    cache: HashMap<i32, AppMeta>,
-}
-
-impl ServerWindows {
-    /// Call on the main thread, so the Dock's strip can be read from `NSScreen`.
-    pub fn new(frame: TargetFrame) -> Self {
-        Self {
-            frame,
-            dock: dock_rect(frame),
-            cache: HashMap::new(),
-        }
-    }
-}
-
-impl WindowSource for ServerWindows {
-    fn cursor(&mut self) -> Option<[f32; 2]> {
-        crate::capture::current_mouse_screen()
-    }
-
-    fn frontmost_pid(&mut self) -> Option<i32> {
-        crate::capture::frontmost_external_pid()
-    }
-
-    fn windows(&mut self) -> Vec<WindowEntry> {
-        snapshot(self.frame, self.dock, &mut self.cache)
-    }
-
-    fn log(&mut self, line: &str) {
-        crate::capture::scrawl_log(line);
-    }
-}
-
-/// Starts logging the window server for a capture of `frame` (see `WindowLogger`). Call on the
-/// main thread.
+/// Starts logging the window server for a capture of `frame` (see `WindowLogger`), with the app
+/// that was in front before Scrawl (`capture::frontmost_external_pid`) as the frontmost. Call on
+/// the main thread.
 pub fn start_logger(
     frame: TargetFrame,
     started_at: Instant,
     request: Arc<AtomicBool>,
 ) -> WindowLogger {
-    WindowLogger::start(ServerWindows::new(frame), frame, started_at, request)
+    let source = NativeWindows::new(frame)
+        .with_frontmost(crate::capture::frontmost_external_pid)
+        .with_log(|line| crate::capture::scrawl_log(line));
+    WindowLogger::start(source, frame, started_at, request)
 }
 
 #[cfg(test)]
