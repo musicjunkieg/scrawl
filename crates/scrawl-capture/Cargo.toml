@@ -7,6 +7,7 @@ description = "What a Scrawl capture records: traits for screen, audio, window-l
 
 [dependencies]
 anyhow = "1.0.104"
+hound = "3.5.1"
 scrawl-bundle = { path = "../scrawl-bundle" }
 
 [dev-dependencies]

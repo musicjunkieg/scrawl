@@ -59,7 +59,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
 
-use crate::audio::AudioRecorder;
+use crate::audio::start_recorder;
 use crate::capture::{ScreenCaptureSession, discover_target};
 use crate::handoff::summary_markdown;
 use crate::model::{CaptureMode, InteractionEvent, ScrawlBundle, Shape, parse_clock_ms};
@@ -670,14 +670,14 @@ pub fn run() -> Result<()> {
             });
             std::fs::create_dir_all(&bundle_dir)?;
             let video_path = bundle_dir.join("recording.mp4");
-            let audio = AudioRecorder::start().ok();
+            let audio = start_recorder().ok();
             let session = ScreenCaptureSession::start(
                 target.clone(),
                 Some(video_path),
                 std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             );
             let window_log = (target.mode == CaptureMode::Display).then(|| {
-                windows::WindowLogger::start(
+                windows::start_logger(
                     target.frame,
                     std::time::Instant::now(),
                     std::sync::Arc::default(),
