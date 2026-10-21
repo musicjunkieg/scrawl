@@ -4747,6 +4747,7 @@ dependencies = [
  "anyhow",
  "core-foundation 0.10.0",
  "core-graphics",
+ "cpal",
  "hound",
  "objc2",
  "objc2-app-kit",
