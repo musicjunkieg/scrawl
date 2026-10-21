@@ -1,5 +1,6 @@
-//! The Windows shell: opening and revealing files, the Recycle Bin, version info, NTFS change
-//! times, thread priority and random bytes.
+//! The Windows shell: opening and revealing files, the Recycle Bin, NTFS change times, thread
+//! priority and random bytes. (An executable's version info is `scrawl-capture`'s:
+//! `native::win::file_description`.)
 
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -10,8 +11,7 @@ use windows::Win32::Security::Cryptography::{BCRYPT_USE_SYSTEM_PREFERRED_RNG, BC
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_READ_ATTRIBUTES,
     FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileBasicInfo,
-    GetFileInformationByHandleEx, GetFileVersionInfoSizeW, GetFileVersionInfoW, OPEN_EXISTING,
-    VerQueryValueW,
+    GetFileInformationByHandleEx, OPEN_EXISTING,
 };
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::System::Threading::{
@@ -81,55 +81,6 @@ pub fn recycle(path: &Path) -> Result<()> {
         );
     }
     Ok(())
-}
-
-/// The `FileDescription` in an executable's version info ("Google Chrome").
-pub fn file_description(path: &Path) -> Option<String> {
-    let name = wide(&path.to_string_lossy());
-    let size = unsafe { GetFileVersionInfoSizeW(PCWSTR(name.as_ptr()), None) };
-    if size == 0 {
-        return None;
-    }
-    let mut data = vec![0_u8; size as usize];
-    unsafe { GetFileVersionInfoW(PCWSTR(name.as_ptr()), None, size, data.as_mut_ptr().cast()) }
-        .ok()?;
-    // The first language and code page in the translation table.
-    let mut translation: *mut u16 = std::ptr::null_mut();
-    let mut len = 0_u32;
-    let query = wide(r"\VarFileInfo\Translation");
-    let found = unsafe {
-        VerQueryValueW(
-            data.as_ptr().cast(),
-            PCWSTR(query.as_ptr()),
-            (&raw mut translation).cast(),
-            &mut len,
-        )
-    };
-    let (lang, page) = if found.as_bool() && len >= 4 && !translation.is_null() {
-        unsafe { (*translation, *translation.add(1)) }
-    } else {
-        (0x0409, 0x04B0)
-    };
-    let key = wide(&format!(
-        r"\StringFileInfo\{lang:04x}{page:04x}\FileDescription"
-    ));
-    let mut value: *mut u16 = std::ptr::null_mut();
-    let mut chars = 0_u32;
-    let found = unsafe {
-        VerQueryValueW(
-            data.as_ptr().cast(),
-            PCWSTR(key.as_ptr()),
-            (&raw mut value).cast(),
-            &mut chars,
-        )
-    };
-    if !found.as_bool() || value.is_null() || chars == 0 {
-        return None;
-    }
-    let slice = unsafe { std::slice::from_raw_parts(value, chars as usize) };
-    let end = slice.iter().position(|&c| c == 0).unwrap_or(slice.len());
-    let text = String::from_utf16_lossy(&slice[..end]).trim().to_owned();
-    (!text.is_empty()).then_some(text)
 }
 
 struct Handle(HANDLE);
