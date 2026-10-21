@@ -22,7 +22,7 @@ use platform::{
 #[cfg(target_os = "windows")]
 pub(crate) use platform::{gpui_display_for, hwnd_of, set_app_icon};
 
-use crate::audio::{AudioCapture, AudioRecorder};
+use crate::audio::{AudioCapture, start_recorder};
 use crate::capture::{
     LiveOverlayEvent, ScreenCapture, ScreenCaptureSession, SharedCaptureTelemetry,
     current_mouse_screen, discover_target, install_global_hotkeys, list_selectable_windows,
@@ -2580,7 +2580,7 @@ impl ScrawlCoordinator {
         });
         start_metric("metal_open_ms", stage);
         let stage = Instant::now();
-        let audio_recorder = AudioRecorder::start()
+        let audio_recorder = start_recorder()
             .ok()
             .map(|recorder| Box::new(recorder) as Box<dyn AudioCapture>);
         start_metric("audio_start_ms", stage);
