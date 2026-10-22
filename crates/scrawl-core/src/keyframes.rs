@@ -189,20 +189,13 @@ fn group_marks(
         .collect();
     drawn.sort_unstable();
     drawn.dedup();
-    let grids: Vec<(usize, LumaGrid)> = std::thread::scope(|scope| {
-        let workers: Vec<_> = drawn
-            .chunks(drawn.len().div_ceil(6).max(1))
-            .map(|chunk| {
-                scope.spawn(move || -> Vec<_> {
-                    chunk.iter().map(|&f| (f, luma_grid(frames[f]))).collect()
-                })
-            })
-            .collect();
-        workers
-            .into_iter()
-            .flat_map(|w| w.join().unwrap())
-            .collect()
-    });
+    let grids: Vec<(usize, LumaGrid)> = crate::par::map(
+        drawn.chunks(drawn.len().div_ceil(6).max(1)),
+        |chunk| -> Vec<_> { chunk.iter().map(|&f| (f, luma_grid(frames[f]))).collect() },
+    )
+    .into_iter()
+    .flat_map(|w| w.unwrap())
+    .collect();
     let grid = |i: usize| {
         grids
             .iter()
@@ -467,21 +460,17 @@ pub fn select_keyframes(
     frames.sort_by_key(|frame| frame.t_ms);
     let thumbnails: Vec<_> = if frames.len() >= 128 {
         let chunk_size = frames.len().div_ceil(6).max(1);
-        std::thread::scope(|scope| {
-            let workers: Vec<_> = frames
-                .chunks(chunk_size)
-                .map(|chunk| {
-                    scope.spawn(move || -> Vec<[f32; THUMB_PIXELS]> {
-                        chunk.iter().map(|frame| luma_thumbnail(frame)).collect()
-                    })
-                })
-                .collect();
-            let mut out = Vec::with_capacity(frames.len());
-            for worker in workers {
-                out.extend(worker.join().unwrap());
-            }
-            out
-        })
+        let workers = crate::par::map(
+            frames.chunks(chunk_size),
+            |chunk| -> Vec<[f32; THUMB_PIXELS]> {
+                chunk.iter().map(|frame| luma_thumbnail(frame)).collect()
+            },
+        );
+        let mut out = Vec::with_capacity(frames.len());
+        for worker in workers {
+            out.extend(worker.unwrap());
+        }
+        out
     } else {
         frames.iter().map(|frame| luma_thumbnail(frame)).collect()
     };
