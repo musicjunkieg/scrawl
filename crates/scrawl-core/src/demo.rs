@@ -37,7 +37,11 @@ pub fn demo_built(bundle_dir: &Path, options: &BuildOptions) -> Result<BuiltBund
     demo_capture(|target, frames, strokes, events, transcript, note| {
         crate::build::build_bundle(
             bundle_dir,
-            "demo".into(),
+            bundle_dir
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("scrawl-bundle")
+                .to_owned(),
             target,
             9_800,
             frames,
@@ -244,10 +248,12 @@ mod tests {
     #[test]
     fn the_in_memory_build_holds_the_files_written_to_disk() {
         let root = std::env::temp_dir().join(format!("scrawl-in-memory-{}", std::process::id()));
-        let dir = root.join("demo.scrawl");
+        // Not `demo.scrawl`: both builds name the bundle after its folder.
+        let dir = root.join("sample.scrawl");
         let options = BuildOptions::default();
         demo_bundle(&dir, &options).unwrap();
         let built = demo_built(&dir, &options).unwrap();
+        assert_eq!(built.bundle.id, "sample");
         let names: Vec<&str> = built.files.iter().map(|(name, _)| name.as_str()).collect();
         assert_eq!(names.first(), Some(&"contact-sheet.png"));
         assert_eq!(names[names.len() - 2..], ["scrawl.json", "summary.md"]);
