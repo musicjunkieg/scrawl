@@ -82,10 +82,12 @@ fn no_transcript() -> TranscriptData {
 pub fn compile(capture: Capture, frames: Vec<RgbaFrame>) -> Result<BuiltBundle> {
     ensure!(!frames.is_empty(), "A capture needs at least one frame");
     for frame in &frames {
+        // Checked: on wasm `usize` is 32 bits, and 65536×65536×4 would wrap to 0.
+        let expected = (frame.width as usize)
+            .checked_mul(frame.height as usize)
+            .and_then(|pixels| pixels.checked_mul(4));
         ensure!(
-            frame.width > 0
-                && frame.height > 0
-                && frame.rgba.len() == frame.width as usize * frame.height as usize * 4,
+            frame.width > 0 && frame.height > 0 && expected == Some(frame.rgba.len()),
             "The frame at {} ms isn't {}×{} RGBA pixels",
             frame.t_ms,
             frame.width,

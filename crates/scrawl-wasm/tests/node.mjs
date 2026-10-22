@@ -79,6 +79,10 @@ assert.throws(() => new Compiler().compile(JSON.stringify(capture)), /at least o
 const bad = new Compiler();
 bad.addFrame(0, width, height, new Uint8Array(10));
 assert.throws(() => bad.compile(JSON.stringify(capture)), /RGBA/);
+// 65536×65536×4 wraps to 0 in 32-bit arithmetic; an empty frame that size is still refused.
+const huge = new Compiler();
+huge.addFrame(0, 65536, 65536, new Uint8Array(0));
+assert.throws(() => huge.compile(JSON.stringify(capture)), /RGBA/);
 assert.throws(() => compiler.compile("{"), /valid JSON/);
 
 console.log(`ok: ${names.length} files, ${manifest.keyframes.length} keyframes, ${ms} ms`);
