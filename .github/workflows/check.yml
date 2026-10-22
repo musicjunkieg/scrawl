@@ -57,7 +57,10 @@ jobs:
           cache-on-failure: true
       # The bundle format, capture traits and compiler build with no OS bindings, so other apps (and
       # wasm) can use them.
-      - run: cargo test --locked -p scrawl-bundle -p scrawl-capture -p scrawl-core -p scrawl-route -p scrawl-wasm
+      - run: cargo test --locked -p scrawl-bundle -p scrawl-capture -p scrawl-core -p scrawl-route -p scrawl-wasm -p scrawl-ffi
+      # The C interface ScrawlKit builds on: a bundle through include/scrawl.h, under AddressSanitizer.
+      - run: cargo build --locked -p scrawl-ffi
+      - run: crates/scrawl-ffi/tests/smoke.sh
       - run: cargo build --locked -p scrawl-capture -p scrawl-core -p scrawl-route --target wasm32-unknown-unknown
       # The browser build: compile a bundle in Node through wasm-bindgen's JS glue. The CLI's
       # version must match the `wasm-bindgen` in Cargo.lock.
