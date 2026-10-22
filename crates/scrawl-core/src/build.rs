@@ -473,18 +473,28 @@ fn build_files(
                 render::stamp_keyframe_badges(full);
             }
             let rendered_at = crate::clock::Instant::now();
-            let mut files = vec![(
-                bundle.contact_sheet.clone(),
-                render::encode_png(&contact_sheet)?,
-            )];
-            files.extend(encode_frames(&annotated, |kf| kf.file.clone())?);
-            if let (Some((info, full)), Some(sheet)) = (&cropped, &full_sheet) {
-                files.push((info.full_contact_sheet.clone(), render::encode_png(sheet)?));
+            // The full-size frames beside a cropped bundle encode alongside the cropped ones.
+            let full_files = || -> Result<Vec<(String, Vec<u8>)>> {
+                let (Some((info, full)), Some(sheet)) = (&cropped, &full_sheet) else {
+                    return Ok(Vec::new());
+                };
+                let mut files = vec![(info.full_contact_sheet.clone(), render::encode_png(sheet)?)];
                 files.extend(encode_frames(full, |kf| {
                     let name = Path::new(&kf.file).file_name().unwrap_or_default();
                     format!("{}/{}", info.full_frames, name.to_string_lossy())
                 })?);
-            }
+                Ok(files)
+            };
+            let (full_files, files) = crate::par::join(full_files, || -> Result<_> {
+                let mut files = vec![(
+                    bundle.contact_sheet.clone(),
+                    render::encode_png(&contact_sheet)?,
+                )];
+                files.extend(encode_frames(&annotated, |kf| kf.file.clone())?);
+                Ok(files)
+            });
+            let mut files = files?;
+            files.extend(full_files.map_err(|_| anyhow::anyhow!("PNG encoding worker panicked"))??);
             (files, rendered_at)
         }
     };
