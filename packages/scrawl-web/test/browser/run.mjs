@@ -1,4 +1,4 @@
-// Records test/browser/index.html in Chromium through @scrawl/web: tab capture, a click,
+// Records test/browser/index.html in Chromium through scrawl-web: tab capture, a click,
 // ⇧ ink, a fake transcriber. Writes the bundle to the folder given (default: a temp dir) and
 // checks it. Needs `npm run build:wasm` and Playwright (`PLAYWRIGHT_BROWSERS_PATH` set).
 //   node test/browser/run.mjs [out-dir]

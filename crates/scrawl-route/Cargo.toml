@@ -3,12 +3,13 @@ name = "scrawl-route"
 version = "0.3.5"
 edition = "2024"
 license = "MIT"
+repository = "https://github.com/musicjunkieg/scrawl"
 description = "Where a Scrawl bundle goes once it is built: OpenCode session lookups, the routing decision, dev-page registrations, and the delivery queue that retries a failed send."
 
 [dependencies]
 anyhow = "1.0.104"
 dirs = "7.0.0"
-scrawl-bundle = { path = "../scrawl-bundle" }
+scrawl-bundle = { path = "../scrawl-bundle", version = "0.3.5" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 

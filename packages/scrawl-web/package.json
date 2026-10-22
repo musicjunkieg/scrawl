@@ -1,5 +1,5 @@
 {
-  "name": "@scrawl/web",
+  "name": "scrawl-web",
   "version": "0.3.5",
   "description": "Record your own web page (screen, clicks, ⇧ ink and voice) and compile a .scrawl bundle for an agent, in the browser.",
   "license": "MIT",

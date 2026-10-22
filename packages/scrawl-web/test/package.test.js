@@ -1,4 +1,4 @@
-// Node tests for @scrawl/web's parts that don't need a browser, and an end-to-end compile
+// Node tests for scrawl-web's parts that don't need a browser, and an end-to-end compile
 // through the browser build of the wasm compiler (`npm run build:wasm` first).
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
