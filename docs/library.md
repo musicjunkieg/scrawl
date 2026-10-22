@@ -1,6 +1,6 @@
 # Scrawl as a library: plan
 
-Status: phases 1–6a done; 6b (capture traits) is in its last step. See **Status and handoff** below. Written 2026-10-19.
+Status: phases 1–6 done; phase 7 (`scrawl-route`) has started. See **Status and handoff** below. Written 2026-10-19.
 
 Goal: any app can add Scrawl's capture-and-compile loop as a dependency, in three shapes:
 
@@ -11,7 +11,7 @@ Goal: any app can add Scrawl's capture-and-compile loop as a dependency, in thre
 
 ## Status and handoff
 
-Updated 2026-10-20. Start here if you are picking this work up.
+Updated 2026-10-22. Start here if you are picking this work up.
 
 ### Done (all merged into `main`)
 
@@ -28,7 +28,7 @@ Updated 2026-10-20. Start here if you are picking this work up.
 
 Another Rust app can already depend on `scrawl-core` and call `build::build_bundle_from_parts` with its own frames, strokes, events and transcript, and implement `scrawl-capture`'s traits for its own sources.
 
-### Next: phase 6b, capture traits
+### Done: phase 6b, capture traits
 
 Goal: a `scrawl-capture` crate with traits for what the app records, and the macOS and Windows implementations behind them, so another Rust app can record as well as compile.
 
@@ -50,18 +50,24 @@ Goal: a `scrawl-capture` crate with traits for what the app records, and the mac
 - **Native window server (#20, merged):** `scrawl-capture`'s default `native` feature (macOS and Windows only; target-gated dependencies on `core-foundation`, `core-graphics`, `objc2`, `objc2-app-kit`, `objc2-foundation` and `windows`) adds `native::window_server` (`raw_windows`, `app_meta_of`, `dock_rect`, `snapshot(frame, dock, front, cache)`) and `native::win` (displays, top-level windows, processes and `file_description`, from `src/win/mod.rs` and `src/win/shell.rs`). The app re-exports them (`src/win/mod.rs` glob-imports `native::win`) and keeps `windows::snapshot`, which passes `capture::frontmost_external_pid` as `front`.
 - **Native window source (#21, merged):** `native::window_server::NativeWindows` is a ready `WindowSource` (`cursor`, `frontmost_pid`, `snapshot`, the Dock's strip read on the main thread when made), with `with_frontmost` and `with_log`. The app's `windows::start_logger` runs one with `capture::frontmost_external_pid` and `scrawl_log`, replacing its `ServerWindows`. Another app: `WindowLogger::start(NativeWindows::new(frame), frame, started_at, request)`.
 - **Native microphone (#22, merged):** `native::mic` (with `cpal`, macOS and Windows only, re-exported as `native::mic::cpal`): `open_device(device, sink, log)` opens a device at its default format into a `Sink` through `Downmix`, `device(id)` finds one, `device_name`, and `start_default(log)` records the default input in a `Recorder`. The app's `audio::start_recorder` keeps choosing the device (`mic`, config) and live transcription, and opens it with `native::mic::open_device`.
-- **Native macOS screen (in review, branch `claude/native-sck`):** `native::sck::run_sampler(sampler, hooks)` is the ScreenCaptureKit recorder (the movie, candidate screenshots, leaving out the recorder's overlays and, when ScreenCaptureKit lists them, macOS's prompts) that `screen::Session::start` runs on macOS. `native::SamplerHooks` carries the app's log, a ready callback (the app's `sck_ready_ms` metric) and the placeholder frame (`native::blank_frame` by default). `screen::{capture_size, source_rect, clamp_to, to_local, Rect}` moved from `src/capture.rs` and `src/screens.rs`. `DOCS_RS=1 cargo check -p scrawl-capture --target aarch64-apple-darwin` type-checks it: the `screencapturekit` build scripts skip the SDK when `DOCS_RS` is set.
-- **Native Windows screen (in review, branch `claude/native-wgc`, on `claude/native-sck`):** `native::wgc::run_sampler(sampler, hooks)` is the Windows.Graphics.Capture recorder (D3D11 video processor crop, scale and NV12; Media Foundation H.264 sink writer; BGRA candidates), moved from `src/win/media.rs` with the same `SamplerHooks`. `media_startup` and `unpack` are public for the app's decoding (`frames`, `probe`, `export_audio`), which stays in `src/win/media.rs` with the helper's types.
-- **Plan for the rest:** split each recorder the same way: the engine (worker, timing, buffers) into the crate over a small source trait, then the macOS and Windows sources into the crate behind a default `native` feature with target-only dependencies. Audio next, then screen.
-- **Still in the app:** the implementations (`ScreenCaptureSession` and its per-platform sampler, `AudioRecorder` and `mic`, `WindowLogger`, the `Hex` / `Live` / `Local` engines) and `transcribe_with`. They lean on app pieces (`retention`, `scrawl_log`, `helper`, config), so moving them is its own phase. Before that, decide whether the sampler is the better seam for other apps (they would supply only frame grabbing; `ScreenCaptureSession` keeps the candidate buffer and timing).
+- **Native macOS screen (#23, merged):** `native::sck::run_sampler(sampler, hooks)` is the ScreenCaptureKit recorder (the movie, candidate screenshots, leaving out the recorder's overlays and, when ScreenCaptureKit lists them, macOS's prompts) that `screen::Session::start` runs on macOS. `native::SamplerHooks` carries the app's log, a ready callback (the app's `sck_ready_ms` metric) and the placeholder frame (`native::blank_frame` by default). `screen::{capture_size, source_rect, clamp_to, to_local, Rect}` moved from `src/capture.rs` and `src/screens.rs`. `DOCS_RS=1 cargo check -p scrawl-capture --target aarch64-apple-darwin` type-checks it: the `screencapturekit` build scripts skip the SDK when `DOCS_RS` is set.
+- **Native Windows screen (#24, merged):** `native::wgc::run_sampler(sampler, hooks)` is the Windows.Graphics.Capture recorder (D3D11 video processor crop, scale and NV12; Media Foundation H.264 sink writer; BGRA candidates), moved from `src/win/media.rs` with the same `SamplerHooks`. `media_startup` and `unpack` are public for the app's decoding (`frames`, `probe`, `export_audio`), which stays in `src/win/media.rs` with the helper's types.
+- **Result:** every recorder is an engine in the crate (`screen::Session`, `audio::Recorder`, `activity::WindowLogger`) with its macOS and Windows sources behind the default `native` feature. Still in the app: choosing the microphone and the live transcriber, the `Hex` / `Live` / `Local` transcription engines and `transcribe_with` (they lean on `helper` and config), retention, and `discover_target`.
 - **Cross-check the crates for macOS and Windows.** `rustup target add aarch64-apple-darwin x86_64-pc-windows-gnu`, then `DOCS_RS=1 cargo check -p scrawl-capture --target aarch64-apple-darwin` and `--target x86_64-pc-windows-gnu` type-check the crate's macOS and Windows code on Linux (no linking, so no SDK). The whole app doesn't cross-check: `transcribe-cpp-sys` (Windows) builds C++ with CMake, and `ring` (macOS) compiles C against the macOS SDK.
 - **Linux doesn't type-check the app.** Name-resolution errors stop `cargo check` before type checking, so a type error in app code is invisible on Linux. To test a module that has no OS calls, include it in a scratch crate with `#[path = ".../src/<module>.rs"]` and stub its `crate::` neighbours.
 
-After 6b come phases 7 (`scrawl-route`), 8 (`scrawl-ffi` for ScrawlKit), 9 (ScrawlKit macOS) and 10 (`@scrawl/web`), as in **Phases** below.
+### Next: phase 7, `scrawl-route`
+
+Goal: a `crates/scrawl-route` crate with what happens to a bundle once it is built (`src/delivery.rs`, `src/routing.rs` with `routing/smart.rs` and `routing/look.rs`, `src/web.rs`, and the OpenCode API calls in `src/handoff.rs`), so OpenCode delivery is something an app opts into. Same method as 6b: one module per PR, the app re-exporting each under its old path.
+
+- **Delivery queue (in review, branch `claude/route-delivery`):** `scrawl_route::delivery` is `src/delivery.rs` (`Delivery`, `Outcome`, `reply_json`, the `.deliver.json` `Pending` marker, `deliver`, `retry_due`, `spawn_retries`). Each function that logs takes a `scrawl_route::Log` (`fn(&str)`); the app's `src/delivery.rs` keeps the old signatures and passes `scrawl_log`. CI tests the crate on Linux and builds it for wasm.
+- **Suggested order for the rest:** the OpenCode session lookups in `handoff` (`OpenCodeSession`, `ApiGet`, `get_session`, `find_root_session`), then `web` (the `/sdk.js` registrations), then `routing` with `smart` and `look`. Sending (`send_bundle_to_session`) runs the `opencode` binary, so it stays in the app or goes behind an `opencode` feature.
+
+After 7 come phases 8 (`scrawl-ffi` for ScrawlKit), 9 (ScrawlKit macOS) and 10 (`@scrawl/web`), as in **Phases** below.
 
 ### Working notes
 
-- **Linux can't build the app.** Its macOS/Windows code fails `cargo check` on Linux with about 113 error lines. Check a change by comparing the sorted error set (messages, without line numbers) of `cargo check -p scrawl --tests` against `main`: they must be identical. The crates build and test normally: `cargo test -p scrawl-bundle -p scrawl-capture -p scrawl-core`, `cargo build -p scrawl-capture -p scrawl-core --target wasm32-unknown-unknown`.
+- **Linux can't build the app.** Its macOS/Windows code fails `cargo check` on Linux with about 113 error lines. Check a change by comparing the sorted error set (messages, without line numbers) of `cargo check -p scrawl --tests` against `main`: they must be identical. The crates build and test normally: `cargo test -p scrawl-bundle -p scrawl-capture -p scrawl-core -p scrawl-route`, `cargo build -p scrawl-capture -p scrawl-core -p scrawl-route --target wasm32-unknown-unknown`.
 - **CI** (`.github/workflows/check.yml`) runs macOS, Windows and `Linux core and wasm`, about 5–15 minutes. It is the only real build of the app. Plain `cargo test` covers the crates through `default-members`.
 - **Golden files.** `SCRAWL_UPDATE_GOLDEN=1 cargo test -p scrawl-core golden` rewrites them (runs on Linux). If a change must alter them, review the diff. When files can only be made on CI, the test prints each mismatching file between `----- actual … -----` markers; the raw job log (GitHub's job-logs URL) can be downloaded and the blocks extracted with a script. `.gitattributes` keeps `tests/golden/**` LF for Windows.
 - **Formatting.** Several files predate rustfmt and have existing diffs; compare `rustfmt --check` hunk counts against `main` rather than reformatting whole files.

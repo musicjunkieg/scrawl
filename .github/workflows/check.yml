@@ -57,5 +57,5 @@ jobs:
           cache-on-failure: true
       # The bundle format, capture traits and compiler build with no OS bindings, so other apps (and
       # wasm) can use them.
-      - run: cargo test --locked -p scrawl-bundle -p scrawl-capture -p scrawl-core
-      - run: cargo build --locked -p scrawl-capture -p scrawl-core --target wasm32-unknown-unknown
+      - run: cargo test --locked -p scrawl-bundle -p scrawl-capture -p scrawl-core -p scrawl-route
+      - run: cargo build --locked -p scrawl-capture -p scrawl-core -p scrawl-route --target wasm32-unknown-unknown
