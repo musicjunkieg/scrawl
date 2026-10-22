@@ -19,6 +19,7 @@ use screencapturekit::screenshot_manager::{CGImageExt, SCScreenshotManager};
 
 use crate::activity::system_prompts_over;
 use crate::model::{CaptureMode, RgbaFrame, TargetInfo};
+use crate::native::SamplerHooks;
 use crate::native::window_server::raw_windows;
 use crate::screen::{
     CANDIDATE_EDGE, CANDIDATE_EDGE_NO_VIDEO, FRAME_SAMPLE_INTERVAL, Sampler, capture_size,
@@ -27,41 +28,6 @@ use crate::screen::{
 
 /// A recording is at most the display's backing scale (2 on Retina).
 pub const MAX_CAPTURE_SCALE: f64 = 2.0;
-
-/// What the sampler tells its app, and the frame it records when a screenshot fails.
-#[derive(Clone, Copy)]
-pub struct SckHooks {
-    /// Where its log lines go.
-    pub log: Option<fn(&str)>,
-    /// Called once ScreenCaptureKit is set up, with the capture's start.
-    pub ready: Option<fn(Instant)>,
-    /// The candidate frame when a screenshot fails or there is no screen to record: its time
-    /// (ms) and how many urgent frames came before it.
-    pub placeholder: fn(u64, u32) -> RgbaFrame,
-}
-
-impl SckHooks {
-    fn log(&self, line: &str) {
-        if let Some(log) = self.log {
-            log(line);
-        }
-    }
-}
-
-impl Default for SckHooks {
-    fn default() -> Self {
-        Self {
-            log: None,
-            ready: None,
-            placeholder: blank_frame,
-        }
-    }
-}
-
-/// A plain dark 1280 by 800 frame.
-pub fn blank_frame(t_ms: u64, _urgent: u32) -> RgbaFrame {
-    RgbaFrame::new(t_ms, 1280, 800, [24, 24, 24, 255].repeat(1280 * 800))
-}
 
 /// Whether this process may record the screen (`CGPreflightScreenCaptureAccess`).
 pub fn screen_capture_granted() -> bool {
@@ -75,7 +41,7 @@ unsafe extern "C" {
 
 /// Records `sampler`'s target until it stops: the movie (when `video_output_path` is set) and
 /// candidate frames, at the buffer's interval or at once when `urgent`. Returns the movie.
-pub fn run_sampler(sampler: Sampler, hooks: SckHooks) -> Option<PathBuf> {
+pub fn run_sampler(sampler: Sampler, hooks: SamplerHooks) -> Option<PathBuf> {
     let Sampler {
         target: sampler_target,
         video_output_path,
@@ -187,7 +153,7 @@ pub fn run_sampler(sampler: Sampler, hooks: SckHooks) -> Option<PathBuf> {
 fn build_sck_filter_and_config(
     target: &TargetInfo,
     excluded_window_ids: &[u32],
-    hooks: SckHooks,
+    hooks: SamplerHooks,
 ) -> Option<(SCContentFilter, SCStreamConfiguration)> {
     let content = match SCShareableContent::get() {
         Ok(c) => c,
@@ -283,7 +249,7 @@ fn setup_sck_capture(
     excluded_window_ids: &[u32],
     started_at: Instant,
     video_offset_ms: &AtomicU64,
-    hooks: SckHooks,
+    hooks: SamplerHooks,
 ) -> (
     Option<SCStream>,
     Option<SCRecordingOutput>,
@@ -347,7 +313,7 @@ fn capture_sck_frame(
 /// starts. They're left out of the recording when ScreenCaptureKit lists them, and frames that
 /// could show one are never candidates, so a prompt doesn't become a keyframe.
 struct SystemPrompts {
-    hooks: SckHooks,
+    hooks: SamplerHooks,
     frame: Option<crate::model::TargetFrame>,
     ids: Vec<u32>,
     /// Which of `ids` the content filter leaves out.
@@ -358,7 +324,7 @@ struct SystemPrompts {
 }
 
 impl SystemPrompts {
-    fn new(target: &TargetInfo, hooks: SckHooks) -> Self {
+    fn new(target: &TargetInfo, hooks: SamplerHooks) -> Self {
         Self {
             hooks,
             // A single window's capture never shows a prompt.
