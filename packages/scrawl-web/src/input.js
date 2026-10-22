@@ -12,6 +12,16 @@ export const SCALE = 10_000;
  * fields give nothing.
  */
 export function describe(element) {
+  const named = nameOf(element);
+  if (!named) return undefined;
+  return named.text ? `<${named.tag}> “${named.text}”` : `<${named.tag}>`;
+}
+
+/**
+ * The element `describe` names (`el`, its `tag`) and its plain name (`text`, maybe empty), by
+ * `describe`'s rules.
+ */
+export function nameOf(element) {
   if (!element || element.nodeType !== 1) return undefined;
   // Inside editable text, name its editing host: an ancestor's text would include what was typed.
   let host = element.isContentEditable ? element : null;
@@ -19,21 +29,20 @@ export function describe(element) {
   const el = host || element.closest?.("a, button, input, select, textarea, [role], label, [aria-label]") || element;
   const tag = el.tagName.toLowerCase();
   const attr = (name) => el.getAttribute?.(name)?.trim();
+  const named = (text) => ({ el, tag, text: (text || "").slice(0, 60) });
   // Editable text: name it by its label or placeholder, never by what was typed into it.
   const role = attr("role");
   if (el.isContentEditable || role === "textbox" || role === "searchbox") {
-    const hint = attr("aria-label") || attr("placeholder") || attr("aria-placeholder");
-    return hint ? `<${tag}> “${hint.slice(0, 60)}”` : `<${tag}>`;
+    return named(attr("aria-label") || attr("placeholder") || attr("aria-placeholder"));
   }
   if (tag === "input" || tag === "textarea" || tag === "select") {
-    if (attr("type") === "password") return `<${tag}>`;
-    const hint = attr("aria-label") || attr("placeholder") || attr("name");
-    return hint ? `<${tag}> “${hint.slice(0, 60)}”` : `<${tag}>`;
+    if (attr("type") === "password") return named("");
+    return named(attr("aria-label") || attr("placeholder") || attr("name"));
   }
-  const name =
+  return named(
     attr("aria-label") || attr("title") || attr("alt") || attr("data-testid") ||
-    (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60);
-  return name ? `<${tag}> “${name}”` : `<${tag}>`;
+      (el.textContent || "").replace(/\s+/g, " ").trim(),
+  );
 }
 
 /** A fraction of the viewport, rounded to 4 places. */

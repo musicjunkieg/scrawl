@@ -38,8 +38,10 @@ try {
   await page.goto(`${base}/test/browser/index.html`);
   await page.evaluate(async () => {
     const { createScrawl } = await import("/src/index.js");
+    window.originals = { fetch: window.fetch, error: console.error };
     window.scrawl = createScrawl({
       interval: 250,
+      agentContext: true,
       context: { route: "/cards" },
       transcribe: async (audio, { durationMs }) => ({
         source: "test",
@@ -50,6 +52,11 @@ try {
   });
   await page.waitForTimeout(700);
   await page.click("#move");
+  // What only the page knows: an error it logs and a request that fails.
+  await page.evaluate(async () => {
+    console.error("card failed to save");
+    await fetch("/api/cards?token=secret").catch(() => {});
+  });
   await page.waitForTimeout(900);
   // ⇧ ink: hold Shift and move the pointer around the card.
   await page.keyboard.down("Shift");
@@ -78,6 +85,15 @@ try {
   assert.ok(m.events.some((e) => e.kind === "click" && /Move the card/.test(e.label || "")), JSON.stringify(m.events));
   assert.equal(m.strokes.length, 1, "one ink stroke");
   assert.match(bundle.summary, /the card should move \(audio\)/);
+  // agentContext: the click names its source, and the error and failed request are events.
+  const labels = m.events.map((e) => e.label).filter(Boolean);
+  assert.ok(labels.includes("<button#move> “Move the card” (src/Card.tsx:12)"), JSON.stringify(labels));
+  assert.ok(labels.some((l) => /^console error: card failed to save \(test\/browser\/run|^console error: card failed to save$/.test(l)), JSON.stringify(labels));
+  assert.ok(labels.includes("GET /api/cards → 404"), JSON.stringify(labels));
+  assert.ok(!JSON.stringify(m).includes("secret"), "no query strings");
+  assert.equal(m.strokes[0].on, "<div#card.card.moved> “A card”", JSON.stringify(m.strokes[0]));
+  const restored = await page.evaluate(() => window.fetch === window.originals.fetch && console.error === window.originals.error);
+  assert.ok(restored, "fetch and console.error are put back");
   assert.match(bundle.summary, /route: \/cards/);
   // A refused microphone: start() fails, and the tab capture and ink overlay are gone.
   const refused = await page.evaluate(async () => {
@@ -106,9 +122,12 @@ try {
   const edge = await fresh.evaluate(async () => {
     const { createScrawl } = await import("/src/index.js");
     const scrawl = createScrawl({ worker: "/missing-worker.js", interval: 250 });
+    const fetchBefore = window.fetch;
     const first = scrawl.start();
     const second = await scrawl.start().then(() => null, (e) => e.message);
     await first;
+    // Without agentContext the page's fetch and console are left alone.
+    if (window.fetch !== fetchBefore) return { second, stopped: "fetch was wrapped", recording: true };
     await new Promise((r) => setTimeout(r, 400));
     const timeout = new Promise((r) => setTimeout(() => r("hung"), 5000));
     const stopped = await Promise.race([scrawl.stop().then(() => "resolved", (e) => e.message), timeout]);

@@ -120,8 +120,17 @@ fn bare_path(raw: &str) -> Option<String> {
 
 /// The event as it may be kept, or `None` for an unknown kind or a time far from `now`.
 fn sanitize(event: Event, now: u64) -> Option<Event> {
+    if event.t + KEEP_MS < now || event.t > now + 5_000 {
+        return None;
+    }
+    tidy(event)
+}
+
+/// The event with every string cut short and unknown fields dropped, or `None` for an unknown
+/// kind.
+fn tidy(event: Event) -> Option<Event> {
     let kinds = ["pointer", "mark", "error", "request", "media"];
-    if !kinds.contains(&event.kind.as_str()) || event.t + KEEP_MS < now || event.t > now + 5_000 {
+    if !kinds.contains(&event.kind.as_str()) {
         return None;
     }
     let target = event.target.map(|t| Target {
@@ -238,6 +247,24 @@ impl Log {
         out.sort_by_key(|e| e.t);
         out
     }
+}
+
+/// At most this many page events go into one capture handed over whole (`clean`).
+const MAX_EVENTS_PER_CAPTURE: usize = 2_000;
+
+/// A page's own events for a capture from `start` to `end` (epoch ms), as a page that records
+/// itself hands them over (`scrawl-web`): cut short like posted ones, outside the capture
+/// dropped, in time order. Unlike `Log` there is no rolling window, so a long capture keeps its
+/// early events.
+pub fn clean(events: Vec<Event>, start: u64, end: u64) -> Vec<Event> {
+    let mut out: Vec<Event> = events
+        .into_iter()
+        .filter(|e| e.t >= start && e.t <= end)
+        .filter_map(tidy)
+        .collect();
+    out.sort_by_key(|e| e.t);
+    out.truncate(MAX_EVENTS_PER_CAPTURE);
+    out
 }
 
 static LOG: Mutex<Log> = Mutex::new(Log { tabs: Vec::new() });
@@ -426,6 +453,33 @@ mod tests {
             component: Some("BrowserHeader".into()),
             source: Some("src/BrowserHeader.tsx:88".into()),
         }
+    }
+
+    #[test]
+    fn a_whole_capture_keeps_its_early_events_and_drops_what_is_outside_it() {
+        let start = 1_000_000;
+        let end = start + 10 * 60_000;
+        let events = vec![
+            Event {
+                message: Some("x".repeat(500)),
+                ..event(end - 1, "error")
+            },
+            event(start + 1, "error"),
+            event(start + 2, "keystroke"),
+            event(start - 1, "error"),
+            event(end + 1, "error"),
+        ];
+        let kept = clean(events, start, end);
+        let times: Vec<u64> = kept.iter().map(|e| e.t).collect();
+        assert_eq!(
+            times,
+            [start + 1, end - 1],
+            "in order, outside and unknown kinds gone"
+        );
+        assert_eq!(
+            kept[1].message.as_ref().unwrap().chars().count(),
+            MAX_MESSAGE
+        );
     }
 
     #[test]

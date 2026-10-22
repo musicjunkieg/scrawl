@@ -44,6 +44,19 @@ bundle.zip();    // a Blob: <id>.scrawl/ with contact-sheet.png, frames/, scrawl
 - **⇧ ink:** hold ⇧ and move the pointer. The ink shows while it's drawn and fades out, and no
   frame is taken while it's on screen, so Scrawl draws it once, from the data.
 - **Scrolls**, and the page's URL, title and `context`.
+- **With `agentContext: true`, what only the page knows**, as Scrawl's `sdk.js` gives the Mac
+  app:
+  - the element under each click and ⇧ mark, with its id, two classes, and the component and
+    source `file:line` from React's dev build or a locator attribute (`data-source-loc`,
+    `data-inspector-relative-path`, `data-sentry-source-file`): `clicked <button#save> “Save” in
+    Toolbar (src/Toolbar.tsx:42)`;
+  - `console.error`, uncaught errors and unhandled rejections, with the first frame in the
+    page's own code;
+  - `fetch` and XHR requests that fail or answer 400+: method, path and status, never the query,
+    body, headers or cookies;
+  - `<video>`/`<audio>` seeks, plays and pauses.
+
+  It wraps `console.error`, `fetch` and XHR while recording and puts them back on `stop()`.
 
 ## Building and testing
 

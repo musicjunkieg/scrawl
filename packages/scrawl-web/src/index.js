@@ -11,6 +11,7 @@
 
 import { sampleFrames } from "./frames.js";
 import { recordInput } from "./input.js";
+import { watchPage } from "./context.js";
 import { missingTranscript, normalizeTranscript } from "./transcript.js";
 import { listen } from "./webspeech.js";
 import { zip } from "./zip.js";
@@ -28,7 +29,9 @@ export { zip } from "./zip.js";
  * @param {string} [options.lang] Web Speech's language (`"en-US"`).
  * @param {string} [options.note] A note for `summary.md`.
  * @param {Record<string, string>} [options.context] What the page knows about itself (route, build).
- * @param {boolean} [options.agentContext] Scrawl's `agentContext` experiment.
+ * @param {boolean} [options.agentContext] Scrawl's `agentContext` experiment: numbered marks,
+ *   richer `summary.md`, and what only the page knows (the element, component and source
+ *   `file:line` under clicks and ⇧ marks, console errors, failed requests, video playback).
  * @param {number} [options.interval] Ms between frame samples (500).
  * @param {number} [options.maxEdge] Frames' longest side in px (1600).
  * @param {boolean} [options.showInk] Draw ⇧ ink while it's drawn (true).
@@ -71,14 +74,17 @@ async function begin(options) {
   const createdAtMs = Date.now();
   let frames = null;
   let input = null;
+  let page = null;
   try {
-    return await record(display, now, createdAtMs, options, (f, i) => {
+    return await record(display, now, createdAtMs, options, (f, i, p) => {
       frames = f;
       input = i;
+      page = p;
     });
   } catch (error) {
     // A refused microphone, say: stop what already started.
     input?.stop();
+    page?.stop();
     await frames?.stop();
     display.getTracks().forEach((track) => track.stop());
     throw error;
@@ -101,7 +107,10 @@ async function record(display, now, createdAtMs, options, started) {
       }
     },
   });
-  started(frames, input);
+  // What only the page knows (the element and component under clicks, errors, failed
+  // requests), as with Scrawl's `sdk.js`: only for the `agentContext` experiment.
+  const page = options.agentContext ? watchPage(() => createdAtMs + now()) : null;
+  started(frames, input, page);
   let audio = null;
   let speech = null;
   if (options.transcribe === "web-speech") {
@@ -109,7 +118,7 @@ async function record(display, now, createdAtMs, options, started) {
   } else if (typeof options.transcribe === "function") {
     audio = await recordAudio();
   }
-  return { display, now, createdAtMs, frames, input, audio, speech };
+  return { display, now, createdAtMs, frames, input, page, audio, speech };
 }
 
 async function recordAudio() {
@@ -140,6 +149,7 @@ async function recordAudio() {
 async function finish(session, options) {
   const durationMs = Math.max(1, session.now());
   const { events, strokes } = session.input.stop();
+  const page = session.page?.stop() ?? [];
   const frames = await session.frames.stop();
   session.display.getTracks().forEach((track) => track.stop());
   const audioBlob = session.audio ? await session.audio.stop() : null;
@@ -176,6 +186,7 @@ async function finish(session, options) {
     note: options.note,
     context: { url: location.href, ...(options.context || {}) },
     agentContext: Boolean(options.agentContext),
+    page,
   };
   const built = await compileInWorker(options.worker, capture, frames);
   return bundleOf(id, built, audioBlob);
