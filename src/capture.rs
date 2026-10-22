@@ -12,9 +12,11 @@ use crate::model::{CaptureMode, InteractionEvent, SCALE, Stroke, TargetFrame, Ta
 mod platform;
 pub use platform::*;
 
+#[cfg(target_os = "windows")]
+pub use scrawl_capture::screen::CANDIDATE_EDGE_NO_VIDEO;
 pub use scrawl_capture::screen::{
-    CANDIDATE_BUDGET_BYTES, CANDIDATE_EDGE, CANDIDATE_EDGE_NO_VIDEO, CandidateBuffer,
-    FRAME_SAMPLE_INTERVAL, Sampler, ScreenCapture, ScreenRecording,
+    CANDIDATE_BUDGET_BYTES, CANDIDATE_EDGE, CandidateBuffer, FRAME_SAMPLE_INTERVAL, Sampler,
+    ScreenCapture, ScreenRecording,
 };
 
 /// Live UI events emitted by the global input monitor to drive Scrawl's HUD & Review windows.
@@ -424,13 +426,7 @@ pub fn region_target(
 /// display's pixels: a 1x display isn't upscaled, and on Windows frames are pixels already,
 /// `MAX_CAPTURE_SCALE`).
 pub fn capture_size(target: &TargetInfo, long_edge: f64) -> (u32, u32) {
-    let max_dim = target.frame.width.max(target.frame.height).max(1.0);
-    let native = target.frame.scale.clamp(1.0, MAX_CAPTURE_SCALE);
-    let scale = (long_edge / max_dim).min(native);
-    (
-        ((target.frame.width * scale).round() as u32).max(48) & !1,
-        ((target.frame.height * scale).round() as u32).max(48) & !1,
-    )
+    scrawl_capture::screen::capture_size(target, long_edge, MAX_CAPTURE_SCALE)
 }
 
 /// Active screen + optional MP4 recorder (ScreenCaptureKit on macOS, Windows.Graphics.Capture

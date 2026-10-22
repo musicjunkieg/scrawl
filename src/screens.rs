@@ -16,8 +16,10 @@
 //!
 use crate::model::TargetFrame;
 
-/// `[x, y, width, height]`.
-pub type Rect = [f64; 4];
+// Rects (`[x, y, width, height]`) and their arithmetic are `scrawl-capture`'s (`screen`).
+pub use scrawl_capture::screen::{Rect, clamp_to};
+#[cfg(test)]
+use scrawl_capture::screen::{source_rect, to_local};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Screen {
@@ -80,34 +82,6 @@ pub fn index_for_rect(screens: &[Screen], r: Rect) -> Option<usize> {
                 })
         })
         .or_else(|| index_at(screens, centre))
-}
-
-/// Global point → points from `screen`'s top-left corner.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn to_local(screen: Rect, p: [f64; 2]) -> [f64; 2] {
-    [p[0] - screen[0], p[1] - screen[1]]
-}
-
-/// The part of `r` on `screen`; `r` itself when they don't meet.
-pub fn clamp_to(r: Rect, screen: Rect) -> Rect {
-    let x0 = r[0].max(screen[0]);
-    let y0 = r[1].max(screen[1]);
-    let x1 = (r[0] + r[2]).min(screen[0] + screen[2]);
-    let y1 = (r[1] + r[3]).min(screen[1] + screen[3]);
-    if x1 > x0 && y1 > y0 {
-        [x0, y0, x1 - x0, y1 - y0]
-    } else {
-        r
-    }
-}
-
-/// `SCStreamConfiguration.sourceRect` for an area: points from its display's top-left corner,
-/// not global ones.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn source_rect(area: Rect, display: Rect) -> Rect {
-    let [x, y, w, h] = clamp_to(area, display);
-    let [lx, ly] = to_local(display, [x, y]);
-    [lx, ly, w, h]
 }
 
 /// The smallest area Scrawl records, points a side.
