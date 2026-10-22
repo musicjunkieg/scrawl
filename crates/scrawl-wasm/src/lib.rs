@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, ensure};
 use scrawl_core::build::{BuildOptions, BuiltBundle, SourceExtras};
 use scrawl_core::model::{InteractionEvent, RgbaFrame, Stroke, TargetInfo, TranscriptData};
+use scrawl_core::page;
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 
@@ -64,6 +65,11 @@ pub struct Capture {
     /// The `agentContext` experiment: numbered marks and the extra context in `summary.md`.
     #[serde(default)]
     pub agent_context: bool,
+    /// What the page saw, in `sdk.js`'s shape at epoch ms (`page::Event`): the element and
+    /// component under clicks and ⇧ marks, console errors, failed requests and video playback.
+    /// They name the capture's clicks and strokes and add app events (`page::apply`).
+    #[serde(default)]
+    pub page: Vec<page::Event>,
 }
 
 fn default_id() -> String {
@@ -100,6 +106,17 @@ pub fn compile(capture: Capture, frames: Vec<RgbaFrame>) -> Result<BuiltBundle> 
             .clone()
             .unwrap_or_else(|| format!("{}.scrawl", capture.id)),
     );
+    let mut events = capture.events;
+    let mut strokes = capture.strokes;
+    if !capture.page.is_empty() {
+        let start = capture.created_at_ms;
+        let seen = page::clean(
+            capture.page,
+            start,
+            start.saturating_add(capture.duration_ms),
+        );
+        page::apply(&seen, start, &mut events, &mut strokes);
+    }
     let options = BuildOptions {
         agent_context: capture.agent_context,
         autocrop: None,
@@ -118,8 +135,8 @@ pub fn compile(capture: Capture, frames: Vec<RgbaFrame>) -> Result<BuiltBundle> 
         capture.target,
         capture.duration_ms,
         frames,
-        capture.strokes,
-        capture.events,
+        strokes,
+        events,
         capture.transcript,
         capture.video,
         capture.audio,
@@ -257,6 +274,41 @@ mod tests {
         assert_eq!(built.bundle.source.as_deref(), Some("web"));
         assert_eq!(built.bundle.transcript.source, "none");
         assert!(built.summary.contains("web-1.scrawl"), "{}", built.summary);
+    }
+
+    #[test]
+    fn what_the_page_saw_names_clicks_and_adds_errors_and_requests() {
+        let start = 1_700_000_000_000_u64;
+        let mut capture = capture();
+        capture.page = serde_json::from_value(serde_json::json!([
+            {"t": start + 880, "kind": "pointer", "target": {
+                "tag": "button", "id": "move", "text": "Move the card",
+                "component": "Card", "source": "src/Card.tsx:12"}},
+            {"t": start + 1_200, "kind": "error", "message": "boom", "source": "src/Card.tsx:30"},
+            {"t": start + 1_500, "kind": "request", "method": "GET",
+             "path": "/api/cards?token=secret", "status": 404},
+            {"t": start + 9_000, "kind": "error", "message": "after the capture"},
+        ]))
+        .unwrap();
+        let built = compile(capture, frames()).unwrap();
+        let labels: Vec<String> = built
+            .bundle
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                InteractionEvent::Click { label, .. } => label.clone(),
+                InteractionEvent::AppEvent { label, .. } => Some(label.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                "<button#move> “Move the card” in Card (src/Card.tsx:12)",
+                "console error: boom (src/Card.tsx:30)",
+                "GET /api/cards → 404",
+            ]
+        );
     }
 
     #[test]

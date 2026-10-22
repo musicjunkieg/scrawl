@@ -15,6 +15,11 @@ export interface ScrawlOptions {
   lang?: string;
   note?: string;
   context?: Record<string, string>;
+  /**
+   * Scrawl's `agentContext` experiment: numbered marks, a richer `summary.md`, and what only the
+   * page knows (the element, component and source `file:line` under clicks and ⇧ marks, console
+   * errors, failed requests, video playback). Off by default.
+   */
   agentContext?: boolean;
   /** Ms between frame samples (500). */
   interval?: number;

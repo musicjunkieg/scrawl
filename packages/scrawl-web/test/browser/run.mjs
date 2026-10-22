@@ -38,8 +38,10 @@ try {
   await page.goto(`${base}/test/browser/index.html`);
   await page.evaluate(async () => {
     const { createScrawl } = await import("/src/index.js");
+    window.originals = { fetch: window.fetch, error: console.error };
     window.scrawl = createScrawl({
       interval: 250,
+      agentContext: true,
       context: { route: "/cards" },
       transcribe: async (audio, { durationMs }) => ({
         source: "test",
@@ -50,6 +52,28 @@ try {
   });
   await page.waitForTimeout(700);
   await page.click("#move");
+  // What only the page knows: an error it logs and a request that fails.
+  await page.evaluate(async () => {
+    console.error("card failed to save");
+    await fetch("/api/cards?token=secret").catch(() => {});
+    // An opaque no-cors response that worked is not a failure.
+    await fetch(`http://localhost:${location.port}/test/browser/index.html`, { mode: "no-cors" }).catch(() => {});
+    // A live stream's duration is Infinity.
+    const canvas = Object.assign(document.createElement("canvas"), { width: 16, height: 16 });
+    canvas.getContext("2d").fillRect(0, 0, 8, 8); // a stream with no frames never plays
+    const video = Object.assign(document.createElement("video"), { muted: true, srcObject: canvas.captureStream() });
+    document.body.append(video);
+    await video.play();
+    video.pause(); // by now its duration is Infinity
+  });
+  // A button inside an open shadow root is named itself, not by its host.
+  await page.evaluate(() => {
+    const host = document.createElement("div");
+    host.id = "host";
+    document.body.append(host);
+    host.attachShadow({ mode: "open" }).innerHTML = `<button aria-label="Inner">x</button>`;
+  });
+  await page.click("#host >> button");
   await page.waitForTimeout(900);
   // ⇧ ink: hold Shift and move the pointer around the card.
   await page.keyboard.down("Shift");
@@ -78,6 +102,18 @@ try {
   assert.ok(m.events.some((e) => e.kind === "click" && /Move the card/.test(e.label || "")), JSON.stringify(m.events));
   assert.equal(m.strokes.length, 1, "one ink stroke");
   assert.match(bundle.summary, /the card should move \(audio\)/);
+  // agentContext: the click names its source, and the error and failed request are events.
+  const labels = m.events.map((e) => e.label).filter(Boolean);
+  assert.ok(labels.includes("<button#move> “Move the card” (src/Card.tsx:12)"), JSON.stringify(labels));
+  assert.ok(labels.some((l) => /^console error: card failed to save \(test\/browser\/run|^console error: card failed to save$/.test(l)), JSON.stringify(labels));
+  assert.ok(labels.includes("GET /api/cards → 404"), JSON.stringify(labels));
+  assert.ok(!labels.some((l) => l.includes("→ failed") || l.includes("→ 0")), JSON.stringify(labels));
+  assert.ok(labels.some((l) => /^video .*paused at \d+:\d\d$/.test(l)), JSON.stringify(labels));
+  assert.ok(labels.includes("<button> “Inner”"), JSON.stringify(labels));
+  assert.ok(!JSON.stringify(m).includes("secret"), "no query strings");
+  assert.equal(m.strokes[0].on, "<div#card.card.moved> “A card”", JSON.stringify(m.strokes[0]));
+  const restored = await page.evaluate(() => window.fetch === window.originals.fetch && console.error === window.originals.error);
+  assert.ok(restored, "fetch and console.error are put back");
   assert.match(bundle.summary, /route: \/cards/);
   // A refused microphone: start() fails, and the tab capture and ink overlay are gone.
   const refused = await page.evaluate(async () => {
@@ -106,9 +142,12 @@ try {
   const edge = await fresh.evaluate(async () => {
     const { createScrawl } = await import("/src/index.js");
     const scrawl = createScrawl({ worker: "/missing-worker.js", interval: 250 });
+    const fetchBefore = window.fetch;
     const first = scrawl.start();
     const second = await scrawl.start().then(() => null, (e) => e.message);
     await first;
+    // Without agentContext the page's fetch and console are left alone.
+    if (window.fetch !== fetchBefore) return { second, stopped: "fetch was wrapped", recording: true };
     await new Promise((r) => setTimeout(r, 400));
     const timeout = new Promise((r) => setTimeout(() => r("hung"), 5000));
     const stopped = await Promise.race([scrawl.stop().then(() => "resolved", (e) => e.message), timeout]);
@@ -133,6 +172,22 @@ try {
     return { error, live: stream.getTracks().some((t) => t.readyState === "live") };
   });
   assert.deepEqual(mic, { error: "NotSupportedError", live: false });
+  // Two recordings at once give the page its own fetch, console.error and XHR back, whichever
+  // stops first.
+  const unwrapped = await fresh.evaluate(async () => {
+    const { watchPage } = await import("/src/context.js");
+    const original = [window.fetch, console.error, XMLHttpRequest.prototype.open, XMLHttpRequest.prototype.send];
+    const same = () => [window.fetch, console.error, XMLHttpRequest.prototype.open, XMLHttpRequest.prototype.send].every((f, i) => f === original[i]);
+    const results = [];
+    for (const order of [[0, 1], [1, 0]]) {
+      const watchers = [watchPage(Date.now), watchPage(Date.now)];
+      const wrapped = !same();
+      for (const i of order) watchers[i].stop();
+      results.push(wrapped && same());
+    }
+    return results;
+  });
+  assert.deepEqual(unwrapped, [true, true], "both stop orders put the originals back");
   // Editable text is named by its label, never by what was typed in it.
   const named = await fresh.evaluate(async () => {
     const { describe } = await import("/src/input.js");
