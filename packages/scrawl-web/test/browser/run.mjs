@@ -17,12 +17,14 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const types = { ".html": "text/html", ".js": "text/javascript", ".wasm": "application/wasm" };
 const server = createServer((req, res) => {
   const path = join(root, decodeURIComponent(new URL(req.url, "http://x").pathname));
+  let body;
   try {
-    res.writeHead(200, { "Content-Type": types[extname(path)] || "application/octet-stream" });
-    res.end(readFileSync(path));
+    body = readFileSync(path);
   } catch {
-    res.writeHead(404).end();
+    return res.writeHead(404).end();
   }
+  res.writeHead(200, { "Content-Type": types[extname(path)] || "application/octet-stream" });
+  res.end(body);
 }).listen(0, "127.0.0.1");
 await new Promise((r) => server.once("listening", r));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -96,6 +98,37 @@ try {
     };
   });
   assert.deepEqual(refused, { error: "NotAllowedError", recording: false, live: false, overlay: false });
+
+  // A second start() while the first is still asking for the tab is refused, and a worker
+  // that can't load makes stop() fail instead of hang.
+  const fresh = await browser.newPage();
+  await fresh.goto(`${base}/test/browser/index.html`);
+  const edge = await fresh.evaluate(async () => {
+    const { createScrawl } = await import("/src/index.js");
+    const scrawl = createScrawl({ worker: "/missing-worker.js", interval: 250 });
+    const first = scrawl.start();
+    const second = await scrawl.start().then(() => null, (e) => e.message);
+    await first;
+    await new Promise((r) => setTimeout(r, 400));
+    const timeout = new Promise((r) => setTimeout(() => r("hung"), 5000));
+    const stopped = await Promise.race([scrawl.stop().then(() => "resolved", (e) => e.message), timeout]);
+    return { second, stopped, recording: scrawl.recording };
+  });
+  assert.equal(edge.second, "Already recording");
+  assert.match(edge.stopped, /worker failed/, JSON.stringify(edge));
+  assert.equal(edge.recording, false);
+  // Editable text is named by its label, never by what was typed in it.
+  const named = await fresh.evaluate(async () => {
+    const { describe } = await import("/src/input.js");
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<section role="region"><div contenteditable><b id="typed">secret words</b></div></section>
+       <div contenteditable aria-label="Notes"><i id="noted">secret</i></div>
+       <div id="tb" role="textbox">also secret</div>`,
+    );
+    return ["typed", "noted", "tb"].map((id) => describe(document.getElementById(id)));
+  });
+  assert.deepEqual(named, ["<div>", "<div> “Notes”", "<div>"]);
 
   console.log(`ok: ${bundle.files.length} files, ${m.keyframes.length} keyframes, ${m.marks.length} marks, built in ${ms} ms → ${out}`);
   console.log(bundle.summary);

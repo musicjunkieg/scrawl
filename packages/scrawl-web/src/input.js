@@ -8,13 +8,23 @@ export const SCALE = 10_000;
 /**
  * A short, plain name for an element, as Scrawl's `sdk.js` gives it: `aria-label`, `title`,
  * `alt` or `data-testid`, else up to 60 characters of its text. Form fields give only a
- * placeholder or name, and never what was typed; password fields give nothing.
+ * placeholder or name, and editable text only its label: never what was typed. Password
+ * fields give nothing.
  */
 export function describe(element) {
   if (!element || element.nodeType !== 1) return undefined;
-  const el = element.closest?.("a, button, input, select, textarea, [role], label, [aria-label]") || element;
+  // Inside editable text, name its editing host: an ancestor's text would include what was typed.
+  let host = element.isContentEditable ? element : null;
+  while (host?.parentElement?.isContentEditable) host = host.parentElement;
+  const el = host || element.closest?.("a, button, input, select, textarea, [role], label, [aria-label]") || element;
   const tag = el.tagName.toLowerCase();
   const attr = (name) => el.getAttribute?.(name)?.trim();
+  // Editable text: name it by its label or placeholder, never by what was typed into it.
+  const role = attr("role");
+  if (el.isContentEditable || role === "textbox" || role === "searchbox") {
+    const hint = attr("aria-label") || attr("placeholder") || attr("aria-placeholder");
+    return hint ? `<${tag}> “${hint.slice(0, 60)}”` : `<${tag}>`;
+  }
   if (tag === "input" || tag === "textarea" || tag === "select") {
     if (attr("type") === "password") return `<${tag}>`;
     const hint = attr("aria-label") || attr("placeholder") || attr("name");

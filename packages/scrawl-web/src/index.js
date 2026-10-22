@@ -36,13 +36,19 @@ export { zip } from "./zip.js";
  */
 export function createScrawl(options = {}) {
   let session = null;
+  let starting = false;
   return {
     get recording() {
       return session !== null;
     },
     async start() {
-      if (session) throw new Error("Already recording");
-      session = await begin(options);
+      if (session || starting) throw new Error("Already recording");
+      starting = true;
+      try {
+        session = await begin(options);
+      } finally {
+        starting = false;
+      }
     },
     async stop() {
       if (!session) throw new Error("Not recording");
@@ -168,19 +174,35 @@ async function finish(session, options) {
   return bundleOf(id, built, audioBlob);
 }
 
-let worker = null;
+// One Worker per script URL, kept between recordings so the wasm loads once.
+const workers = new Map();
 let nextId = 0;
 function compileInWorker(url, capture, frames) {
-  worker ??= new Worker(url ?? new URL("./worker.js", import.meta.url), { type: "module" });
+  const href = String(url ?? new URL("./worker.js", import.meta.url));
+  if (!workers.has(href)) workers.set(href, new Worker(href, { type: "module" }));
+  const current = workers.get(href);
   const id = ++nextId;
   return new Promise((resolve, reject) => {
+    const done = () => {
+      current.removeEventListener("message", onMessage);
+      current.removeEventListener("error", onError);
+    };
     const onMessage = ({ data }) => {
       if (data.id !== id) return;
-      worker.removeEventListener("message", onMessage);
+      done();
       data.error ? reject(new Error(data.error)) : resolve(data);
     };
-    worker.addEventListener("message", onMessage);
-    worker.postMessage({ id, capture, frames });
+    // The script failed to load or threw outside a message: drop this Worker so the next
+    // stop() starts a fresh one instead of waiting on a dead one.
+    const onError = (event) => {
+      done();
+      current.terminate();
+      if (workers.get(href) === current) workers.delete(href);
+      reject(new Error(`Scrawl's worker failed: ${event.message || "it could not be loaded"}`));
+    };
+    current.addEventListener("message", onMessage);
+    current.addEventListener("error", onError);
+    current.postMessage({ id, capture, frames });
   });
 }
 

@@ -10,18 +10,41 @@
 export function compileFrames(Compiler, capture, frames) {
   const compiler = new Compiler();
   try {
-    for (const f of frames) {
-      compiler.addFrame(f.t, f.width, f.height, f.data instanceof Uint8Array ? f.data : new Uint8Array(f.data.buffer, f.data.byteOffset, f.data.byteLength));
-    }
-    const bundle = compiler.compile(JSON.stringify(capture));
-    try {
-      const files = bundle.fileNames().map((name) => [name, bundle.file(name)]);
-      return { files, summary: bundle.summary, manifest: JSON.parse(bundle.manifest) };
-    } finally {
-      bundle.free?.();
-    }
+    for (const f of frames) addFrame(compiler, f);
+    return collect(compiler, capture);
   } finally {
     compiler.free?.();
+  }
+}
+
+/**
+ * Like `compileFrames`, but `feed(add)` hands frames over one at a time (it may be async),
+ * so a caller can decode each frame just before adding it instead of holding them all.
+ * @param {{ new(): any }} Compiler
+ * @param {object} capture
+ * @param {(add: (frame: { t: number, width: number, height: number, data: Uint8Array | Uint8ClampedArray }) => void) => void | Promise<void>} feed
+ */
+export async function compileStreaming(Compiler, capture, feed) {
+  const compiler = new Compiler();
+  try {
+    await feed((f) => addFrame(compiler, f));
+    return collect(compiler, capture);
+  } finally {
+    compiler.free?.();
+  }
+}
+
+function addFrame(compiler, f) {
+  compiler.addFrame(f.t, f.width, f.height, f.data instanceof Uint8Array ? f.data : new Uint8Array(f.data.buffer, f.data.byteOffset, f.data.byteLength));
+}
+
+function collect(compiler, capture) {
+  const bundle = compiler.compile(JSON.stringify(capture));
+  try {
+    const files = bundle.fileNames().map((name) => [name, bundle.file(name)]);
+    return { files, summary: bundle.summary, manifest: JSON.parse(bundle.manifest) };
+  } finally {
+    bundle.free?.();
   }
 }
 
