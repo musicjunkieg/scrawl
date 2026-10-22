@@ -3,6 +3,7 @@ name = "scrawl-wasm"
 version = "0.3.5"
 edition = "2024"
 license = "MIT"
+repository = "https://github.com/musicjunkieg/scrawl"
 description = "Scrawl's bundle compiler for the browser: a capture's frames, ink, events and transcript in, the .scrawl bundle's files out, through wasm-bindgen."
 
 [lib]
@@ -10,7 +11,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 anyhow = "1.0.104"
-scrawl-core = { path = "../scrawl-core", default-features = false }
+scrawl-core = { path = "../scrawl-core", version = "0.3.5", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 wasm-bindgen = "0.2.129"

@@ -1,4 +1,4 @@
-// @scrawl/web: record your own page and hand an agent a `.scrawl` bundle. The tab's video
+// scrawl-web: record your own page and hand an agent a `.scrawl` bundle. The tab's video
 // (`getDisplayMedia` with `preferCurrentTab`, so the browser asks once), clicks, scrolls, ⇧ ink
 // and voice go in; the bundle (`contact-sheet.png`, `frames/`, `scrawl.json`, `summary.md`)
 // comes out, built in a Worker by Scrawl's compiler in wasm. Nothing leaves the page unless the

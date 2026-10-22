@@ -1,6 +1,6 @@
 # Scrawl as a library: plan
 
-Status: phases 1–7 done; phase 10 (`@scrawl/web`) has started. See **Status and handoff** below. Written 2026-10-19.
+Status: phases 1–7 done; phase 10 (`scrawl-web`) is under way. See **Status and handoff** below. Written 2026-10-19.
 
 Goal: any app can add Scrawl's capture-and-compile loop as a dependency, in three shapes:
 
@@ -67,7 +67,7 @@ Goal: a `crates/scrawl-route` crate with what happens to a bundle once it is bui
 - **Routing ladder (#29, merged):** `scrawl_route::ladder` holds what `src/routing.rs` decides without reaching outside: `Browser` and `browser_kind`, the `lsof` output parsers, `project_root`, `session_for_directory`, `Hooks` (`sdk`, `listener_dir`, `api`) and `route`, and the `routing.json` record (`RECORD`, `write_record`, `read_record`), with their tests. `Hooks` has no `Default` in the crate; the app's `routing::hooks()` passes `web::lookup`, `lsof` and `opencode2 api`. Still in the app: the OS calls (`browser_tab_url` through `osascript`, `listener_directory` through `lsof`, `run_with_timeout`), `route_capture`, `look_capture`, `judge_capture`, `explain_bundle`, `record_destination` (it writes `summary.md`), and `look`, which is all I/O (the tab, the terminal pane, Tailscale, OpenCode Desktop's state) and feeds `smart::decide`.
 - **After phase 7:** sending (`send_bundle_to_session`) runs the `opencode` binary and stays in the app. Another app routes with `scrawl_route::ladder::route` and its own `Hooks`, or builds `smart::Evidence` itself and calls `smart::decide`.
 
-### Next: phase 10, `@scrawl/web`
+### Next: phase 10, `scrawl-web`
 
 Goal: a web app records its own page and compiles the bundle in the browser (**npm package** below). Phase 8 (`scrawl-ffi`) and 9 (ScrawlKit macOS) need a Mac to build and test, so 10 went first.
 
@@ -78,13 +78,14 @@ Goal: a web app records its own page and compiles the bundle in the browser (**n
   - Checked: the demo bundle's files are byte for byte the same before and after, and the same in wasm (in Node, about 0.3 s) as native.
 - **`crates/scrawl-wasm` (#31, merged):** the compiler for JavaScript through `wasm-bindgen` (0.2.129, already in the lockfile). `new Compiler()`, `addFrame(tMs, width, height, rgba)` (an `ImageData`'s pixels), then `compile(JSON.stringify(capture))` returns a `Bundle` with `fileNames()`, `file(name)` (bytes), `summary` and `manifest`. A capture is `scrawl.json`'s own types in camelCase (`target`, `durationMs`, `strokes`, `events`, `transcript`, `flags`, `context`, `source`, `id`, `createdAtMs`, `agentContext`); without a transcript the bundle's `transcript.source` is `none`. Bad frames or JSON are a thrown `Error`, never a panic. In Rust it's `scrawl_wasm::compile(Capture, frames)`.
   - CI's `Linux core and wasm` job installs `wasm-bindgen-cli` 0.2.129 (it must match the lockfile's `wasm-bindgen`), builds the crate for wasm, and runs `crates/scrawl-wasm/tests/node.mjs`, which compiles a four-frame capture in Node and checks the files, PNGs, `scrawl.json` and `summary.md` (about 60 ms).
-- **`packages/scrawl-web` (`@scrawl/web`, in review, branch `claude/scrawl-web`):** the page recorder, plain ES modules with no dependencies. `createScrawl(options)`, `start()`, `stop()` returns the bundle (`files`, `summary`, `manifest`, `audio`, `file(name)`, `zip()`).
+- **`packages/scrawl-web` (`scrawl-web` on npm, #32, merged):** the page recorder, plain ES modules with no dependencies. `createScrawl(options)`, `start()`, `stop()` returns the bundle (`files`, `summary`, `manifest`, `audio`, `file(name)`, `zip()`).
   - Frames: the tab's video (`getDisplayMedia` with `preferCurrentTab`), sampled every `interval` ms (500) and 150 ms after each click, at most `maxEdge` px (1600), skipping frames whose 16×16 luma thumbnail didn't change, kept as WebP (PNG on Safari) until the build.
   - Input: clicks with a short label (the rules `sdk.js` uses; never typed values), scrolls, and ⇧ ink (hold ⇧ and move). The page shows the ink while it's drawn and fades it; frame sampling pauses from the stroke's start until it has faded, so frames never show it and Scrawl draws it once, from `strokes`.
   - Transcription (decision 4): the page's own `transcribe(audio, { durationMs })` (the microphone through `MediaRecorder`), or the opt-in `"web-speech"` (live `SpeechRecognition` in Chrome, Edge and Safari; phrase times, `estimated`), or nothing (`transcript.missing`).
   - The build runs in a module Worker (`src/worker.js`), which decodes the frames and calls `scrawl-wasm` built with `wasm-bindgen --target web` (`scripts/build-wasm.sh` into `wasm/`). `zip()` is a stored (uncompressed) zip with a `<id>.scrawl/` folder.
   - Tests: `npm test` (zip checked by Python's `zipfile`, transcripts, strokes, change detection, Web Speech with a fake recognizer, and a compile through the browser wasm in Node), and `test/browser/run.mjs`, which records `test/browser/index.html` in Chromium through Playwright (tab capture auto-accepted, a click, ⇧ ink, a fake transcriber) and checks the bundle. CI's `Web package` job runs both.
-- **Next:** publish (the npm scope and crate names are still open, **Decisions needed** 2); an optional POST of the zip to a Scrawl endpoint with the ingest token; `sdk.js`'s richer page context (component and source `file:line`, console errors, failed requests) in `@scrawl/web`.
+- **Names for publishing (decision 2):** the five library crates keep their names (`scrawl-bundle`, `scrawl-capture`, `scrawl-core`, `scrawl-route`, `scrawl-wasm`), all free on crates.io; their path dependencies carry `version = "0.3.5"` and each has `repository`, so `cargo publish --dry-run -p scrawl-bundle -p scrawl-capture -p scrawl-core -p scrawl-route -p scrawl-wasm` packages and verifies all five in order. The npm package is `scrawl-web` (unscoped): the `@scrawl` scope belongs to another account. `npm pack` builds the wasm first (`prepack`). Nothing is published yet; that needs the owner's crates.io and npm logins.
+- **Next:** an optional POST of the zip to a Scrawl endpoint with the ingest token; `sdk.js`'s richer page context (component and source `file:line`, console errors, failed requests) in `scrawl-web`.
 
 After 10 come phases 8 (`scrawl-ffi` for ScrawlKit) and 9 (ScrawlKit macOS), as in **Phases** below.
 
@@ -145,7 +146,7 @@ anyone's process**, and give each platform a crew that feeds it.
           │ xcframework     │  │ → npm         │  │ Windows impls    │
           └───────▲─────────┘  └──────▲────────┘  └────▲─────────────┘
                   │                   │                │
-      ScrawlKit (iOS + macOS)   @scrawl/web (npm)   scrawl app (gpui shell,
+      ScrawlKit (iOS + macOS)   scrawl-web (npm)    scrawl app (gpui shell,
                                                     settings, onboarding)
                                                           │
                                               scrawl-route (optional crate:
@@ -228,7 +229,7 @@ bundle output. Estimates assume one person who knows the code.
 | 7 | `scrawl-route` crate from `routing`, `delivery`, `web` | OpenCode delivery is opt-in | 2 days |
 | 8 | `scrawl-ffi` (UniFFI) + xcframework build script; ScrawlKit can compile on device | iOS apps get bundles without a Mac | 3 days |
 | 9 | ScrawlKit macOS target: ScreenCaptureKit window recorder, reuse `Ink`, `InkView`, `Overlay` via AppKit hosting | Mac apps embed Scrawl | 4 days |
-| 10 | `scrawl-wasm` + `@scrawl/web`: page recorder (below), compile in a Worker, output a zip or POST | Web apps embed Scrawl | 4 days |
+| 10 | `scrawl-wasm` + `scrawl-web`: page recorder (below), compile in a Worker, output a zip or POST | Web apps embed Scrawl | 4 days |
 
 Total: about 21 working days. Phases 1–5 (about 5.5 days) deliver the Rust crate and unblock the rest.
 
@@ -252,7 +253,7 @@ Total: about 21 working days. Phases 1–5 (about 5.5 days) deliver the Rust cra
   ScreenCaptureKit scoped to the host app's own windows, so no Screen Recording prompt beyond the
   app's own.
 
-### npm package (`@scrawl/web`)
+### npm package (`scrawl-web`)
 
 - Records only the host page, no extension needed:
   - frames: `getDisplayMedia({ preferCurrentTab: true })` into a `<video>`, sampled to `ImageBitmap`
@@ -278,6 +279,6 @@ Total: about 21 working days. Phases 1–5 (about 5.5 days) deliver the Rust cra
 
 1. ~~**Workspace vs `Cargo.toml` stability.**~~ Decided 2026-10-20: a multi-crate workspace is
    fine. Phase 5 goes ahead as written.
-2. **Crate names on crates.io / npm scope.** `scrawl` and `@scrawl` may be taken.
+2. ~~**Crate names on crates.io / npm scope.**~~ Decided 2026-10-22: the crates keep their `scrawl-*` names (all free; the app crate `scrawl` is taken but isn't published), and the npm package is `scrawl-web`, since the `@scrawl` scope belongs to another account.
 3. **Is OpenCode delivery part of the library story,** or app-only? This plan makes it optional.
 4. ~~**Web transcription default.**~~ Decided 2026-10-22: the page's own `transcribe` function, with `"web-speech"` as an opt-in; without either, no transcript.

@@ -1,4 +1,4 @@
-# @scrawl/web
+# scrawl-web
 
 Record your own web page and hand an agent a `.scrawl` bundle: the page as it looked, where
 you clicked, what you circled with ⇧ ink, and what you said. The bundle is built in the
@@ -6,7 +6,7 @@ browser by Scrawl's compiler (Rust, in wasm, in a Worker). Nothing leaves the pa
 your page sends it.
 
 ```js
-import { createScrawl } from "@scrawl/web";
+import { createScrawl } from "scrawl-web";
 
 const scrawl = createScrawl({
   // Your transcriber: the recorded audio in, text with times (ms) out.
