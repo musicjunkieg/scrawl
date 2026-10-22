@@ -137,14 +137,16 @@ try {
   at("checking a refused microphone");
   const refused = await page.evaluate(async () => {
     const { createScrawl } = await import("/src/index.js");
-    const getDisplayMedia = navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices);
+    const media = navigator.mediaDevices;
+    const real = { getDisplayMedia: media.getDisplayMedia, getUserMedia: media.getUserMedia };
     let display;
-    navigator.mediaDevices.getDisplayMedia = async (c) => (display = await getDisplayMedia(c));
-    navigator.mediaDevices.getUserMedia = async () => {
+    media.getDisplayMedia = async (c) => (display = await real.getDisplayMedia.call(media, c));
+    media.getUserMedia = async () => {
       throw new DOMException("Permission denied", "NotAllowedError");
     };
     const scrawl = createScrawl({ transcribe: async () => ({ text: "x" }) });
     const error = await scrawl.start().then(() => null, (e) => e.name);
+    Object.assign(media, real); // the checks below record on this tab too
     return {
       error,
       recording: scrawl.recording,
@@ -155,11 +157,10 @@ try {
   assert.deepEqual(refused, { error: "NotAllowedError", recording: false, live: false, overlay: false });
 
   // A second start() while the first is still asking for the tab is refused, and a worker
-  // that can't load makes stop() fail instead of hang.
-  const fresh = await browser.newPage();
-  await fresh.goto(`${base}/test/browser/index.html`);
+  // that can't load makes stop() fail instead of hang. Every check records this same tab: on
+  // CI's headless shell a second tab's capture never delivers a frame.
   at("checking a second start() and a missing worker");
-  const edge = await fresh.evaluate(async () => {
+  const edge = await page.evaluate(async () => {
     const { createScrawl } = await import("/src/index.js");
     const scrawl = createScrawl({ worker: "/missing-worker.js", interval: 250 });
     const fetchBefore = window.fetch;
@@ -178,7 +179,7 @@ try {
   assert.equal(edge.recording, false);
   // A recorder that can't start turns the microphone back off.
   at("checking a recorder that cannot start");
-  const mic = await fresh.evaluate(async () => {
+  const mic = await page.evaluate(async () => {
     const { createScrawl } = await import("/src/index.js");
     const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
     let stream;
@@ -196,7 +197,7 @@ try {
   // Two recordings at once give the page its own fetch, console.error and XHR back, whichever
   // stops first.
   at("checking two recordings at once");
-  const unwrapped = await fresh.evaluate(async () => {
+  const unwrapped = await page.evaluate(async () => {
     const { watchPage } = await import("/src/context.js");
     const original = [window.fetch, console.error, XMLHttpRequest.prototype.open, XMLHttpRequest.prototype.send];
     const same = () => [window.fetch, console.error, XMLHttpRequest.prototype.open, XMLHttpRequest.prototype.send].every((f, i) => f === original[i]);
@@ -212,7 +213,7 @@ try {
   assert.deepEqual(unwrapped, [true, true], "both stop orders put the originals back");
   // Editable text is named by its label, never by what was typed in it.
   at("checking editable text");
-  const named = await fresh.evaluate(async () => {
+  const named = await page.evaluate(async () => {
     const { describe } = await import("/src/input.js");
     document.body.insertAdjacentHTML(
       "beforeend",
