@@ -34,7 +34,7 @@ pub struct Senses {
 impl Default for Senses {
     fn default() -> Self {
         Self {
-            hooks: Hooks::default(),
+            hooks: super::hooks(),
             own_port,
             terminal: terminal_pane,
         }

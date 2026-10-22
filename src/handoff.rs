@@ -7,12 +7,9 @@ use serde::Deserialize;
 
 use crate::model::ScrawlBundle;
 
-pub use scrawl_route::opencode::{
-    ApiGet, OpenCodeSession, ROOT_SEARCH_PAGES, Scan, find_root_session, get_session, query_escape,
-    resolve_opencode_session_with,
-};
+pub use scrawl_route::opencode::{ApiGet, query_escape, resolve_opencode_session_with};
 #[cfg(test)]
-pub(crate) use scrawl_route::opencode::{OpenCodeSessionLocation, OpenCodeSessionTime, fake_api};
+pub(crate) use scrawl_route::opencode::{OpenCodeSession, fake_api};
 
 /// `~/Library/Application Support/scrawl/captures` on macOS, `%LOCALAPPDATA%\scrawl\captures`
 /// on Windows (local, not roaming: the movies are large).

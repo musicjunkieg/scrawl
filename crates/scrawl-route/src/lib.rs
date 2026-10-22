@@ -4,6 +4,9 @@
 //!   it, and the queue that retries a send that failed.
 //! - [`opencode`]: OpenCode's session API (look a session up, search the open root sessions, pick
 //!   the one a capture goes to), over a transport the caller passes in.
+//! - [`ladder`]: where a capture of a browser tab goes when smart routing is off (its page's
+//!   registration, else the project serving its loopback port), with the outside steps in
+//!   [`ladder::Hooks`].
 //! - [`smart`]: where a capture goes, decided from the evidence gathered around it, with no I/O
 //!   and no clock, so the same evidence always gives the same decision (`docs/routing.md`).
 //! - [`web`]: the `/sdk.js` script a dev page loads to say which session it belongs to, the
@@ -14,6 +17,7 @@
 //! app's queues it into an OpenCode session), and a [`Log`] for the lines worth keeping.
 
 pub mod delivery;
+pub mod ladder;
 pub mod opencode;
 pub mod smart;
 pub mod url;
