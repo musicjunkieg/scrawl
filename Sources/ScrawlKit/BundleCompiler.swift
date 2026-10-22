@@ -41,24 +41,30 @@ public final class BundleCompiler {
 
   /// Adds the screen as it looked `tMs` into the recording: `width`×`height` RGBA pixels. These
   /// can be small (the Mac app uses 480 px) when the keyframes are added again with
-  /// `addFullFrame`.
-  public func addFrame(at tMs: UInt64, width: Int, height: Int, rgba: Data) {
-    rgba.withUnsafeBytes { pixels in
-      _ = scrawl_compiler_add_frame(
-        compiler, tMs, UInt32(width), UInt32(height),
-        pixels.bindMemory(to: UInt8.self).baseAddress, pixels.count
-      )
-    }
+  /// `addFullFrame`. Throws when `rgba` isn't `width × height × 4` bytes.
+  public func addFrame(at tMs: UInt64, width: Int, height: Int, rgba: Data) throws {
+    try add(tMs, width, height, rgba, scrawl_compiler_add_frame)
   }
 
   /// Adds a keyframe at full size, at one of `keyframeTimes`.
-  public func addFullFrame(at tMs: UInt64, width: Int, height: Int, rgba: Data) {
-    rgba.withUnsafeBytes { pixels in
-      _ = scrawl_compiler_add_full_frame(
-        compiler, tMs, UInt32(width), UInt32(height),
-        pixels.bindMemory(to: UInt8.self).baseAddress, pixels.count
-      )
+  public func addFullFrame(at tMs: UInt64, width: Int, height: Int, rgba: Data) throws {
+    try add(tMs, width, height, rgba, scrawl_compiler_add_full_frame)
+  }
+
+  private func add(
+    _ tMs: UInt64, _ width: Int, _ height: Int, _ rgba: Data,
+    _ call: (OpaquePointer?, UInt64, UInt32, UInt32, UnsafePointer<UInt8>?, Int) -> Bool
+  ) throws {
+    let (area, overflow) = width.multipliedReportingOverflow(by: height)
+    guard let w = UInt32(exactly: width), let h = UInt32(exactly: height), w > 0, h > 0, !overflow,
+          area <= Int.max / 4, rgba.count == area * 4
+    else {
+      throw Failure(description: "The frame at \(tMs) ms is \(rgba.count) bytes, not \(width)×\(height) RGBA")
     }
+    let added = rgba.withUnsafeBytes { pixels in
+      call(compiler, tMs, w, h, pixels.bindMemory(to: UInt8.self).baseAddress, pixels.count)
+    }
+    guard added else { throw Failure(description: "The compiler refused the frame at \(tMs) ms") }
   }
 
   /// The times (ms) of the keyframes `compile` will pick from the frames added so far.

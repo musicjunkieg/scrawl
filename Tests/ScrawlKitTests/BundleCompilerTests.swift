@@ -17,20 +17,21 @@ struct BundleCompilerTests {
     Data(repeating: shade, count: width * height * 4)
   }
 
-  /// A PNG's width, from its IHDR chunk.
-  func width(_ png: Data) -> UInt32 {
-    png.dropFirst(16).prefix(4).reduce(0) { $0 << 8 | UInt32($1) }
+  /// A PNG's width and height, from its IHDR chunk.
+  func size(_ png: Data) -> (width: UInt32, height: UInt32) {
+    let read = { (at: Int) -> UInt32 in png.dropFirst(at).prefix(4).reduce(0) { $0 << 8 | UInt32($1) } }
+    return (read(16), read(20))
   }
 
   @Test func smallCandidatesPickTheKeyframesAndFullFramesDrawThem() throws {
     let compiler = BundleCompiler()
     for (i, t) in [0, 900, 1800].enumerated() {
-      compiler.addFrame(at: UInt64(t), width: 64, height: 40, rgba: pixels(64, 40, UInt8(30 + i * 60)))
+      try compiler.addFrame(at: UInt64(t), width: 64, height: 40, rgba: pixels(64, 40, UInt8(30 + i * 60)))
     }
     let times = try compiler.keyframeTimes(capture: capture)
     #expect(!times.isEmpty)
     for t in times {
-      compiler.addFullFrame(at: t, width: 128, height: 80, rgba: pixels(128, 80, UInt8(truncatingIfNeeded: t / 10)))
+      try compiler.addFullFrame(at: t, width: 128, height: 80, rgba: pixels(128, 80, UInt8(truncatingIfNeeded: t / 10)))
     }
     let bundle = try compiler.compile(capture: capture)
     #expect(bundle.files.first?.name == "contact-sheet.png")
@@ -38,7 +39,8 @@ struct BundleCompilerTests {
     let frames = bundle.files.filter { $0.name.hasPrefix("frames/") }
     #expect(frames.count == times.count)
     for frame in frames {
-      #expect(width(frame.data) == 128, "\(frame.name) is drawn from its full frame")
+      let (width, height) = size(frame.data)
+      #expect(width == 128 && height == 80, "\(frame.name) is drawn from its full frame")
     }
     #expect(bundle.summary.contains("this button"))
 
@@ -52,6 +54,15 @@ struct BundleCompilerTests {
   }
 
   @Test func badInputThrowsInsteadOfCrashing() {
+    #expect(throws: BundleCompiler.Failure.self) {
+      try BundleCompiler().addFrame(at: 0, width: -1, height: 40, rgba: pixels(64, 40, 0))
+    }
+    #expect(throws: BundleCompiler.Failure.self) {
+      try BundleCompiler().addFrame(at: 0, width: 64, height: 40, rgba: Data())
+    }
+    #expect(throws: BundleCompiler.Failure.self) {
+      try BundleCompiler().addFrame(at: 0, width: 64, height: 40, rgba: pixels(64, 39, 0))
+    }
     #expect(throws: BundleCompiler.Failure.self) {
       try BundleCompiler().compile(capture: "{}")
     }
