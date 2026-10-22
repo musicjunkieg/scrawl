@@ -1,0 +1,17 @@
+{
+  "name": "@scrawl/web",
+  "version": "0.3.5",
+  "description": "Record your own web page (screen, clicks, ⇧ ink and voice) and compile a .scrawl bundle for an agent, in the browser.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./worker": "./src/worker.js"
+  },
+  "types": "./src/index.d.ts",
+  "files": ["src", "wasm"],
+  "scripts": {
+    "build:wasm": "./scripts/build-wasm.sh",
+    "test": "node --test test/*.test.js"
+  }
+}
