@@ -117,6 +117,22 @@ try {
   assert.equal(edge.second, "Already recording");
   assert.match(edge.stopped, /worker failed/, JSON.stringify(edge));
   assert.equal(edge.recording, false);
+  // A recorder that can't start turns the microphone back off.
+  const mic = await fresh.evaluate(async () => {
+    const { createScrawl } = await import("/src/index.js");
+    const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    let stream;
+    navigator.mediaDevices.getUserMedia = async (c) => (stream = await getUserMedia(c));
+    window.MediaRecorder = class {
+      start() {
+        throw new DOMException("No encoder", "NotSupportedError");
+      }
+    };
+    const scrawl = createScrawl({ transcribe: async () => ({ text: "x" }) });
+    const error = await scrawl.start().then(() => null, (e) => e.name);
+    return { error, live: stream.getTracks().some((t) => t.readyState === "live") };
+  });
+  assert.deepEqual(mic, { error: "NotSupportedError", live: false });
   // Editable text is named by its label, never by what was typed in it.
   const named = await fresh.evaluate(async () => {
     const { describe } = await import("/src/input.js");

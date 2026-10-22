@@ -12,6 +12,7 @@
   "files": ["src", "wasm"],
   "scripts": {
     "build:wasm": "./scripts/build-wasm.sh",
+    "prepack": "npm run build:wasm",
     "test": "node --test test/*.test.js"
   }
 }

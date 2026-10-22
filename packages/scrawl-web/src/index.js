@@ -114,10 +114,17 @@ async function record(display, now, createdAtMs, options, started) {
 
 async function recordAudio() {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const recorder = new MediaRecorder(stream);
   const chunks = [];
-  recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-  recorder.start(1000);
+  let recorder;
+  try {
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    recorder.start(1000);
+  } catch (error) {
+    // A recorder that can't start must not leave the microphone on.
+    stream.getTracks().forEach((track) => track.stop());
+    throw error;
+  }
   return {
     stop: () =>
       new Promise((resolve) => {
