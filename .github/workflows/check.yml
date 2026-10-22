@@ -91,5 +91,6 @@ jobs:
       - run: "\"$RUNNER_TEMP/pw/node_modules/.bin/playwright\" install --with-deps chromium"
       - run: node test/browser/run.mjs "$RUNNER_TEMP/bundle"
         working-directory: packages/scrawl-web
+        timeout-minutes: 5
         env:
           PLAYWRIGHT_MODULE: ${{ runner.temp }}/pw/node_modules/playwright

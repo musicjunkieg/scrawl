@@ -28,6 +28,21 @@ const server = createServer((req, res) => {
 }).listen(0, "127.0.0.1");
 await new Promise((r) => server.once("listening", r));
 const base = `http://127.0.0.1:${server.address().port}`;
+// Another origin, for a no-cors request that succeeds with an opaque response.
+const other = createServer((req, res) => res.end("ok")).listen(0, "127.0.0.1");
+await new Promise((r) => other.once("listening", r));
+const otherOrigin = `http://127.0.0.1:${other.address().port}`;
+
+// A step that hangs fails the run instead of holding CI until its job limit.
+let step = "launching Chromium";
+const watchdog = setTimeout(() => {
+  console.error(`timed out after 120 s while ${step}`);
+  process.exit(1);
+}, 120_000);
+const at = (name) => {
+  step = name;
+  console.log(`· ${name}`);
+};
 
 const browser = await chromium.launch({
   args: ["--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],
@@ -36,6 +51,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 900, height: 560 } });
   page.on("console", (m) => m.type() === "error" && console.error("page:", m.text()));
   await page.goto(`${base}/test/browser/index.html`);
+  at("starting a recording");
   await page.evaluate(async () => {
     const { createScrawl } = await import("/src/index.js");
     window.originals = { fetch: window.fetch, error: console.error };
@@ -53,19 +69,20 @@ try {
   await page.waitForTimeout(700);
   await page.click("#move");
   // What only the page knows: an error it logs and a request that fails.
-  await page.evaluate(async () => {
+  at("logging an error and making requests");
+  await page.evaluate(async (otherOrigin) => {
     console.error("card failed to save");
     await fetch("/api/cards?token=secret").catch(() => {});
     // An opaque no-cors response that worked is not a failure.
-    await fetch(`http://localhost:${location.port}/test/browser/index.html`, { mode: "no-cors" }).catch(() => {});
-    // A live stream's duration is Infinity.
-    const canvas = Object.assign(document.createElement("canvas"), { width: 16, height: 16 });
-    canvas.getContext("2d").fillRect(0, 0, 8, 8); // a stream with no frames never plays
-    const video = Object.assign(document.createElement("video"), { muted: true, srcObject: canvas.captureStream() });
+    await fetch(`${otherOrigin}/ping`, { mode: "no-cors" }).catch(() => {});
+    // A live stream reports its duration as Infinity; no real playback, which a CI runner may
+    // never start.
+    const video = document.createElement("video");
+    Object.defineProperty(video, "duration", { value: Infinity });
     document.body.append(video);
-    await video.play();
-    video.pause(); // by now its duration is Infinity
-  });
+    video.dispatchEvent(new Event("pause"));
+  }, otherOrigin);
+  at("clicking inside a shadow root");
   // A button inside an open shadow root is named itself, not by its host.
   await page.evaluate(() => {
     const host = document.createElement("div");
@@ -83,6 +100,7 @@ try {
   await page.keyboard.up("Shift");
   await page.waitForTimeout(900);
   const started = Date.now();
+  at("stopping and building the bundle");
   const bundle = await page.evaluate(async () => {
     const b = await window.scrawl.stop();
     const toBase64 = (bytes) => btoa(Array.from(bytes, (c) => String.fromCharCode(c)).join(""));
@@ -116,6 +134,7 @@ try {
   assert.ok(restored, "fetch and console.error are put back");
   assert.match(bundle.summary, /route: \/cards/);
   // A refused microphone: start() fails, and the tab capture and ink overlay are gone.
+  at("checking a refused microphone");
   const refused = await page.evaluate(async () => {
     const { createScrawl } = await import("/src/index.js");
     const getDisplayMedia = navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices);
@@ -139,6 +158,7 @@ try {
   // that can't load makes stop() fail instead of hang.
   const fresh = await browser.newPage();
   await fresh.goto(`${base}/test/browser/index.html`);
+  at("checking a second start() and a missing worker");
   const edge = await fresh.evaluate(async () => {
     const { createScrawl } = await import("/src/index.js");
     const scrawl = createScrawl({ worker: "/missing-worker.js", interval: 250 });
@@ -157,6 +177,7 @@ try {
   assert.match(edge.stopped, /worker failed/, JSON.stringify(edge));
   assert.equal(edge.recording, false);
   // A recorder that can't start turns the microphone back off.
+  at("checking a recorder that cannot start");
   const mic = await fresh.evaluate(async () => {
     const { createScrawl } = await import("/src/index.js");
     const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
@@ -174,6 +195,7 @@ try {
   assert.deepEqual(mic, { error: "NotSupportedError", live: false });
   // Two recordings at once give the page its own fetch, console.error and XHR back, whichever
   // stops first.
+  at("checking two recordings at once");
   const unwrapped = await fresh.evaluate(async () => {
     const { watchPage } = await import("/src/context.js");
     const original = [window.fetch, console.error, XMLHttpRequest.prototype.open, XMLHttpRequest.prototype.send];
@@ -189,6 +211,7 @@ try {
   });
   assert.deepEqual(unwrapped, [true, true], "both stop orders put the originals back");
   // Editable text is named by its label, never by what was typed in it.
+  at("checking editable text");
   const named = await fresh.evaluate(async () => {
     const { describe } = await import("/src/input.js");
     document.body.insertAdjacentHTML(
@@ -201,9 +224,11 @@ try {
   });
   assert.deepEqual(named, ["<div>", "<div> “Notes”", "<div>"]);
 
+  clearTimeout(watchdog);
   console.log(`ok: ${bundle.files.length} files, ${m.keyframes.length} keyframes, ${m.marks.length} marks, built in ${ms} ms → ${out}`);
   console.log(bundle.summary);
 } finally {
   await browser.close();
   server.close();
+  other.close();
 }
