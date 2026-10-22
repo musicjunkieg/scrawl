@@ -3,9 +3,13 @@ name = "scrawl-route"
 version = "0.3.5"
 edition = "2024"
 license = "MIT"
-description = "Where a Scrawl bundle goes once it is built: the delivery queue that retries a failed send."
+description = "Where a Scrawl bundle goes once it is built: OpenCode session lookups and the delivery queue that retries a failed send."
 
 [dependencies]
 anyhow = "1.0.104"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+
+[features]
+# `opencode::fake_api`, a fake OpenCode session API for tests.
+fake-api = []
