@@ -10,6 +10,8 @@ const MAX_EVENTS = 2_000;
 const ignored = /\/node_modules\/|\/\.vite\/deps\/|react-dom|jsx-dev-runtime|jsx-runtime/;
 // This file's own frames (the console.error wrapper) are never the page's code.
 const self = import.meta.url.split(/[?#]/)[0];
+// Each wrapper this file installs, what it wrapped, and whether its recording has stopped.
+const stale = new WeakMap();
 
 const clip = (text, max) => {
   const s = String(text == null ? "" : text).replace(/\s+/g, " ").trim();
@@ -165,15 +167,21 @@ export function watchPage(stamp) {
     }),
   );
 
-  // Wrapped until stop(): each wrapper goes quiet then, and is put back if nothing has wrapped
-  // it since.
+  // Wrapped until stop(): each wrapper goes quiet then. It is taken out if nothing has wrapped it
+  // since, and otherwise once the wrapper above it is taken out.
   const restores = [];
   const wrap = (owner, key, make) => {
     const original = owner[key];
     const wrapper = make(original);
+    stale.set(wrapper, { original, done: false });
     owner[key] = wrapper;
     restores.push(() => {
-      if (owner[key] === wrapper) owner[key] = original;
+      stale.get(wrapper).done = true;
+      if (owner[key] !== wrapper) return;
+      // Skip wrappers of recordings that already stopped under this one.
+      let next = original;
+      while (stale.get(next)?.done) next = stale.get(next).original;
+      owner[key] = next;
     });
   };
   wrap(console, "error", (original) =>

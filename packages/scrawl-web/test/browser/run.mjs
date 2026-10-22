@@ -172,6 +172,22 @@ try {
     return { error, live: stream.getTracks().some((t) => t.readyState === "live") };
   });
   assert.deepEqual(mic, { error: "NotSupportedError", live: false });
+  // Two recordings at once give the page its own fetch, console.error and XHR back, whichever
+  // stops first.
+  const unwrapped = await fresh.evaluate(async () => {
+    const { watchPage } = await import("/src/context.js");
+    const original = [window.fetch, console.error, XMLHttpRequest.prototype.open, XMLHttpRequest.prototype.send];
+    const same = () => [window.fetch, console.error, XMLHttpRequest.prototype.open, XMLHttpRequest.prototype.send].every((f, i) => f === original[i]);
+    const results = [];
+    for (const order of [[0, 1], [1, 0]]) {
+      const watchers = [watchPage(Date.now), watchPage(Date.now)];
+      const wrapped = !same();
+      for (const i of order) watchers[i].stop();
+      results.push(wrapped && same());
+    }
+    return results;
+  });
+  assert.deepEqual(unwrapped, [true, true], "both stop orders put the originals back");
   // Editable text is named by its label, never by what was typed in it.
   const named = await fresh.evaluate(async () => {
     const { describe } = await import("/src/input.js");
