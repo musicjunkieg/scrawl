@@ -1765,13 +1765,11 @@ pub fn annotate_and_crop(
             );
             input.pin_ink(selected.iter().map(|(k, _)| k), strokes, marks);
             let screen = input.screen;
-            input.content = std::thread::scope(|scope| {
-                let workers: Vec<_> = selected
-                    .iter()
-                    .map(|(_, frame)| scope.spawn(move || Content::from_frame(frame, screen)))
+            input.content =
+                crate::par::map(&selected, |(_, frame)| Content::from_frame(frame, screen))
+                    .into_iter()
+                    .map(|w| w.ok())
                     .collect();
-                workers.into_iter().map(|w| w.join().ok()).collect()
-            });
             // A crop bug must never cost the capture: fall back to the full frames.
             let crops = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 compute(&input, settings)
@@ -1783,85 +1781,75 @@ pub fn annotate_and_crop(
                 .then_some((crops, changes))
         });
     let Some((crops, changes)) = plan else {
-        let frames = std::thread::scope(|scope| {
-            let workers: Vec<_> = selected
-                .into_iter()
-                .map(|(kf, mut frame)| {
-                    scope.spawn(move || {
-                        annotate_keyframe_marks_in_place(
-                            &mut frame,
-                            &kf,
-                            strokes,
-                            marks,
-                            events,
-                            agent_context,
-                        );
-                        (kf, frame)
-                    })
-                })
-                .collect();
-            workers.into_iter().map(|w| w.join().unwrap()).collect()
-        });
+        let frames = crate::par::map(selected, |(kf, mut frame)| {
+            annotate_keyframe_marks_in_place(
+                &mut frame,
+                &kf,
+                strokes,
+                marks,
+                events,
+                agent_context,
+            );
+            (kf, frame)
+        })
+        .into_iter()
+        .map(|w| w.unwrap())
+        .collect();
         return (frames, None);
     };
     let mut cropped = Vec::with_capacity(selected.len());
     let mut full = Vec::with_capacity(selected.len());
     let mut infos = Vec::with_capacity(selected.len());
     let (w, h) = (target.frame.width, target.frame.height);
-    let results: Vec<_> = std::thread::scope(|scope| {
-        let workers: Vec<_> = selected
-            .into_iter()
-            .zip(&crops)
-            .map(|((kf, mut raw), crop)| {
-                scope.spawn(move || {
-                    let out = if crop.kind == CropKind::Full {
-                        annotate_keyframe_marks_in_place(
-                            &mut raw,
-                            &kf,
-                            strokes,
-                            marks,
-                            events,
-                            agent_context,
-                        );
-                        raw.clone()
-                    } else {
-                        let mut out = crop_frame(&raw, crop.rect);
-                        let view = crop_view(crop.rect, &kf, strokes, marks, events);
-                        annotate_keyframe_marks_in_place(
-                            &mut out,
-                            &view.keyframe,
-                            &view.strokes,
-                            &view.marks,
-                            &view.events,
-                            agent_context,
-                        );
-                        annotate_keyframe_marks_in_place(
-                            &mut raw,
-                            &kf,
-                            strokes,
-                            marks,
-                            events,
-                            agent_context,
-                        );
-                        out
-                    };
-                    let r = crop.rect.map(f64::from);
-                    let crop_info = crate::model::KeyframeCrop {
-                        index: kf.index,
-                        x: (r[0] * w).round(),
-                        y: (r[1] * h).round(),
-                        width: ((r[2] - r[0]) * w).round(),
-                        height: ((r[3] - r[1]) * h).round(),
-                        kind: crop.kind,
-                        reason: crop.reason.clone(),
-                        apps: crop.apps.clone(),
-                    };
-                    (crop_info, (kf.clone(), out), (kf, raw))
-                })
-            })
-            .collect();
-        workers.into_iter().map(|w| w.join().unwrap()).collect()
-    });
+    let results: Vec<_> =
+        crate::par::map(selected.into_iter().zip(&crops), |((kf, mut raw), crop)| {
+            let out = if crop.kind == CropKind::Full {
+                annotate_keyframe_marks_in_place(
+                    &mut raw,
+                    &kf,
+                    strokes,
+                    marks,
+                    events,
+                    agent_context,
+                );
+                raw.clone()
+            } else {
+                let mut out = crop_frame(&raw, crop.rect);
+                let view = crop_view(crop.rect, &kf, strokes, marks, events);
+                annotate_keyframe_marks_in_place(
+                    &mut out,
+                    &view.keyframe,
+                    &view.strokes,
+                    &view.marks,
+                    &view.events,
+                    agent_context,
+                );
+                annotate_keyframe_marks_in_place(
+                    &mut raw,
+                    &kf,
+                    strokes,
+                    marks,
+                    events,
+                    agent_context,
+                );
+                out
+            };
+            let r = crop.rect.map(f64::from);
+            let crop_info = crate::model::KeyframeCrop {
+                index: kf.index,
+                x: (r[0] * w).round(),
+                y: (r[1] * h).round(),
+                width: ((r[2] - r[0]) * w).round(),
+                height: ((r[3] - r[1]) * h).round(),
+                kind: crop.kind,
+                reason: crop.reason.clone(),
+                apps: crop.apps.clone(),
+            };
+            (crop_info, (kf.clone(), out), (kf, raw))
+        })
+        .into_iter()
+        .map(|w| w.unwrap())
+        .collect();
     for (crop_info, crop_pair, full_pair) in results {
         infos.push(crop_info);
         cropped.push(crop_pair);
@@ -1875,38 +1863,6 @@ pub fn annotate_and_crop(
         changes,
     };
     (cropped, Some((info, full)))
-}
-
-/// Writes the full keyframes and contact sheet that sit beside a cropped bundle's.
-pub fn write_full_frames(
-    dir: &std::path::Path,
-    info: &crate::model::AutocropInfo,
-    frames: &[(Keyframe, RgbaFrame)],
-    sheet: &RgbaFrame,
-) -> anyhow::Result<()> {
-    let out = dir.join(&info.full_frames);
-    std::fs::create_dir_all(&out)?;
-    std::thread::scope(|scope| -> anyhow::Result<()> {
-        let workers: Vec<_> = frames
-            .iter()
-            .map(|(kf, frame)| {
-                let out = &out;
-                scope.spawn(move || -> anyhow::Result<()> {
-                    let name = std::path::Path::new(&kf.file)
-                        .file_name()
-                        .unwrap_or_default();
-                    crate::render::save_png(frame, &out.join(name))
-                })
-            })
-            .collect();
-        crate::render::save_png(sheet, &dir.join(&info.full_contact_sheet))?;
-        for worker in workers {
-            worker
-                .join()
-                .map_err(|_| anyhow::anyhow!("PNG encoding worker panicked"))??;
-        }
-        Ok(())
-    })
 }
 
 #[cfg(test)]

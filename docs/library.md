@@ -1,6 +1,6 @@
 # Scrawl as a library: plan
 
-Status: phases 1–6 done; phase 7 (`scrawl-route`) has started. See **Status and handoff** below. Written 2026-10-19.
+Status: phases 1–7 done; phase 10 (`@scrawl/web`) has started. See **Status and handoff** below. Written 2026-10-19.
 
 Goal: any app can add Scrawl's capture-and-compile loop as a dependency, in three shapes:
 
@@ -56,18 +56,29 @@ Goal: a `scrawl-capture` crate with traits for what the app records, and the mac
 - **Cross-check the crates for macOS and Windows.** `rustup target add aarch64-apple-darwin x86_64-pc-windows-gnu`, then `DOCS_RS=1 cargo check -p scrawl-capture --target aarch64-apple-darwin` and `--target x86_64-pc-windows-gnu` type-check the crate's macOS and Windows code on Linux (no linking, so no SDK). The whole app doesn't cross-check: `transcribe-cpp-sys` (Windows) builds C++ with CMake, and `ring` (macOS) compiles C against the macOS SDK.
 - **Linux doesn't type-check the app.** Name-resolution errors stop `cargo check` before type checking, so a type error in app code is invisible on Linux. To test a module that has no OS calls, include it in a scratch crate with `#[path = ".../src/<module>.rs"]` and stub its `crate::` neighbours.
 
-### Next: phase 7, `scrawl-route`
+### Done: phase 7, `scrawl-route`
 
 Goal: a `crates/scrawl-route` crate with what happens to a bundle once it is built (`src/delivery.rs`, `src/routing.rs` with `routing/smart.rs` and `routing/look.rs`, `src/web.rs`, and the OpenCode API calls in `src/handoff.rs`), so OpenCode delivery is something an app opts into. Same method as 6b: one module per PR, the app re-exporting each under its old path.
 
 - **Delivery queue (#25, merged):** `scrawl_route::delivery` is `src/delivery.rs` (`Delivery`, `Outcome`, `reply_json`, the `.deliver.json` `Pending` marker, `deliver`, `retry_due`, `spawn_retries`). Each function that logs takes a `scrawl_route::Log` (`fn(&str)`); the app's `src/delivery.rs` keeps the old signatures and passes `scrawl_log`. CI tests the crate on Linux and builds it for wasm.
 - **OpenCode lookups (#26, merged):** `scrawl_route::opencode` holds `OpenCodeSession` (with its V1/V2 `directory`), `ApiGet`, `get_session`, `find_root_session` with `Scan` and `ROOT_SEARCH_PAGES`, `query_escape`, and `resolve_opencode_session_with` (an explicit ID, an app title match, `env_session`, the newest root), with their tests. The transport stays in the app (`handoff::api_get` runs `opencode2 api get`, locally or over SSH), as does sending. `opencode::fake_api`, the fake session API the routing and phone tests serve from, is behind the crate's `fake-api` feature, which the app turns on as a dev-dependency.
 - **Page registrations (#27, merged):** `scrawl_route::web` is `src/web.rs` with `src/sdk.js` (now `crates/scrawl-route/src/sdk.js`): the script, the `Registry` of live pages, who may register (`may_register`, `constant_time_eq`), the `/sdk.js` and `/web/*` routes (`handle`), and `fetch_registrations(port, token)`. `handle` takes `web::Hooks` (the log, whether pages should send context, and what keeps it); `lookup(url, remote)` asks `remote` when this process isn't serving. `scrawl_route::url` holds `WebUrl`, `parse_url` and `is_loopback_host` from `routing`. The app's `src/web.rs` passes Scrawl's log, the `agentContext` experiment, `page::record`, the ingest port and token.
-- **Routing decision (in review, branch `claude/route-smart`):** `scrawl_route::smart` is `src/routing/smart.rs`, moved whole with its tests: the `Evidence`, `Candidate` and `Clue` types, `decide` (the ladder and weighing policies, no clock and no I/O), `destination` and `explain`. The app's `routing::smart` re-exports it. `is_home_or_root` is now `pub`, because `look` (still in the app) calls it. The crate gains `scrawl-bundle` (for `Destination`) and `dirs`.
-- **Routing ladder (in review, branch `claude/route-look`, on `claude/route-smart`):** `scrawl_route::ladder` holds what `src/routing.rs` decides without reaching outside: `Browser` and `browser_kind`, the `lsof` output parsers, `project_root`, `session_for_directory`, `Hooks` (`sdk`, `listener_dir`, `api`) and `route`, and the `routing.json` record (`RECORD`, `write_record`, `read_record`), with their tests. `Hooks` has no `Default` in the crate; the app's `routing::hooks()` passes `web::lookup`, `lsof` and `opencode2 api`. Still in the app: the OS calls (`browser_tab_url` through `osascript`, `listener_directory` through `lsof`, `run_with_timeout`), `route_capture`, `look_capture`, `judge_capture`, `explain_bundle`, `record_destination` (it writes `summary.md`), and `look`, which is all I/O (the tab, the terminal pane, Tailscale, OpenCode Desktop's state) and feeds `smart::decide`.
-- **After phase 7:** sending (`send_bundle_to_session`) runs the `opencode` binary and stays in the app. Another app routes with `scrawl_route::ladder::route` and its own `Hooks`, or builds `smart::Evidence` itself and calls `smart::decide`. Sending (`send_bundle_to_session`) runs the `opencode` binary, so it stays in the app or goes behind an `opencode` feature.
+- **Routing decision (#28, merged):** `scrawl_route::smart` is `src/routing/smart.rs`, moved whole with its tests: the `Evidence`, `Candidate` and `Clue` types, `decide` (the ladder and weighing policies, no clock and no I/O), `destination` and `explain`. The app's `routing::smart` re-exports it. `is_home_or_root` is now `pub`, because `look` (still in the app) calls it. The crate gains `scrawl-bundle` (for `Destination`) and `dirs`.
+- **Routing ladder (#29, merged):** `scrawl_route::ladder` holds what `src/routing.rs` decides without reaching outside: `Browser` and `browser_kind`, the `lsof` output parsers, `project_root`, `session_for_directory`, `Hooks` (`sdk`, `listener_dir`, `api`) and `route`, and the `routing.json` record (`RECORD`, `write_record`, `read_record`), with their tests. `Hooks` has no `Default` in the crate; the app's `routing::hooks()` passes `web::lookup`, `lsof` and `opencode2 api`. Still in the app: the OS calls (`browser_tab_url` through `osascript`, `listener_directory` through `lsof`, `run_with_timeout`), `route_capture`, `look_capture`, `judge_capture`, `explain_bundle`, `record_destination` (it writes `summary.md`), and `look`, which is all I/O (the tab, the terminal pane, Tailscale, OpenCode Desktop's state) and feeds `smart::decide`.
+- **After phase 7:** sending (`send_bundle_to_session`) runs the `opencode` binary and stays in the app. Another app routes with `scrawl_route::ladder::route` and its own `Hooks`, or builds `smart::Evidence` itself and calls `smart::decide`.
 
-After 7 come phases 8 (`scrawl-ffi` for ScrawlKit), 9 (ScrawlKit macOS) and 10 (`@scrawl/web`), as in **Phases** below.
+### Next: phase 10, `@scrawl/web`
+
+Goal: a web app records its own page and compiles the bundle in the browser (**npm package** below). Phase 8 (`scrawl-ffi`) and 9 (ScrawlKit macOS) need a Mac to build and test, so 10 went first.
+
+- **The core runs in wasm (in review, branch `claude/scrawl-wasm`):** `scrawl-core` built for wasm already, but couldn't run there: `std::thread::spawn` and `Instant::now` panic on `wasm32-unknown-unknown`, and the build wrote to disk. Now:
+  - `par::map` and `par::join` run its parallel work (keyframe grids and thumbnails, autocrop's content and annotation, contact sheets, PNG encoding) on threads natively and in turn on wasm, results in order.
+  - `clock::Instant` is `std::time::Instant` natively; on wasm every instant is the same, so the `finish timings` read 0 ms.
+  - `build::build_bundle` builds in memory and hands back a `BuiltBundle` (`bundle`, `summary`, `files`, images first and `summary.md` last); `build_bundle_from_parts` is it plus `build::write_files`. `demo::demo_built` is the demo bundle built that way.
+  - Checked: the demo bundle's files are byte for byte the same before and after, and the same in wasm (in Node, about 0.3 s) as native.
+- **Next:** `crates/scrawl-wasm` (`wasm-bindgen`, already in the lockfile): `compile(timeline, frames)` returning the bundle's files, tested in Node in CI. Then the page recorder and the npm package.
+
+After 10 come phases 8 (`scrawl-ffi` for ScrawlKit) and 9 (ScrawlKit macOS), as in **Phases** below.
 
 ### Working notes
 

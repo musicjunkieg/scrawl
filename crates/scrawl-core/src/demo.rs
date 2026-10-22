@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::build::{BuildOptions, SourceExtras};
+use crate::build::{BuildOptions, BuiltBundle, SourceExtras};
 use crate::model::*;
 use crate::render::render_synthetic_demo_frame;
 
@@ -15,6 +15,59 @@ pub fn demo_bundle(
     bundle_dir: &Path,
     options: &BuildOptions,
 ) -> Result<(PathBuf, ScrawlBundle, String)> {
+    demo_capture(|target, frames, strokes, events, transcript, note| {
+        crate::build::build_bundle_from_parts(
+            bundle_dir,
+            target,
+            9_800,
+            frames,
+            strokes,
+            events,
+            transcript,
+            None,
+            note,
+            SourceExtras::default(),
+            options,
+        )
+    })
+}
+
+/// The demo bundle built in memory (`build::build_bundle`), as if it lived in `bundle_dir`.
+pub fn demo_built(bundle_dir: &Path, options: &BuildOptions) -> Result<BuiltBundle> {
+    demo_capture(|target, frames, strokes, events, transcript, note| {
+        crate::build::build_bundle(
+            bundle_dir,
+            bundle_dir
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("scrawl-bundle")
+                .to_owned(),
+            target,
+            9_800,
+            frames,
+            strokes,
+            events,
+            transcript,
+            None,
+            None,
+            note,
+            SourceExtras::default(),
+            options,
+        )
+    })
+}
+
+/// The demo capture's parts, handed to `build`: target, frames, ink, events, transcript, note.
+fn demo_capture<T>(
+    build: impl FnOnce(
+        TargetInfo,
+        Vec<RgbaFrame>,
+        Vec<Stroke>,
+        Vec<InteractionEvent>,
+        TranscriptData,
+        Option<String>,
+    ) -> Result<T>,
+) -> Result<T> {
     let (fw, fh) = (1280_u32, 800_u32);
     let target = TargetInfo {
         mode: CaptureMode::Window,
@@ -172,18 +225,13 @@ pub fn demo_bundle(
         missing: None,
     };
 
-    crate::build::build_bundle_from_parts(
-        bundle_dir,
+    build(
         target,
-        9_800,
         frames,
         strokes,
         events,
         transcript,
-        None,
         Some("Header inset shifts on expand".into()),
-        SourceExtras::default(),
-        options,
     )
 }
 
@@ -196,6 +244,33 @@ mod tests {
     /// creation time and the bundle's folder are blanked and floats rounded to 3 places, so the
     /// files are the same on every platform. `SCRAWL_UPDATE_GOLDEN=1 cargo test -p scrawl-core
     /// golden` rewrites them; review the diff before committing it.
+    /// `build::build_bundle` hands back exactly the files `build_bundle_from_parts` writes.
+    #[test]
+    fn the_in_memory_build_holds_the_files_written_to_disk() {
+        let root = std::env::temp_dir().join(format!("scrawl-in-memory-{}", std::process::id()));
+        // Not `demo.scrawl`: both builds name the bundle after its folder.
+        let dir = root.join("sample.scrawl");
+        let options = BuildOptions::default();
+        demo_bundle(&dir, &options).unwrap();
+        let built = demo_built(&dir, &options).unwrap();
+        assert_eq!(built.bundle.id, "sample");
+        let names: Vec<&str> = built.files.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names.first(), Some(&"contact-sheet.png"));
+        assert_eq!(names[names.len() - 2..], ["scrawl.json", "summary.md"]);
+        let mut on_disk = 0;
+        for entry in std::fs::read_dir(dir.join("frames")).unwrap() {
+            on_disk += usize::from(entry.unwrap().file_type().unwrap().is_file());
+        }
+        assert_eq!(built.files.len(), on_disk + 3);
+        for (name, bytes) in &built.files {
+            assert!(
+                &std::fs::read(dir.join(name)).unwrap() == bytes,
+                "{name} differs"
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn demo_bundle_matches_the_golden_files() {
         let mut differs = Vec::new();
