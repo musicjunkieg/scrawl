@@ -173,9 +173,11 @@ struct InkTests {
 
   @Test func hairpinsAndCrossingsLeaveNoHoles() {
     // Down, then straight back up over itself, then across: every overlap must stay filled.
-    let line = (0 ..< 40).map { CGPoint(x: 50, y: Double($0) * 2) }
-      + (0 ..< 40).map { CGPoint(x: 50.5, y: 78 - Double($0) * 2) }
-      + (0 ..< 40).map { CGPoint(x: 10 + Double($0) * 2, y: 40) }
+    // Typed in parts: as one expression it times out Swift's type checker.
+    let down: [CGPoint] = (0 ..< 40).map { CGPoint(x: 50, y: Double($0) * 2) }
+    let up: [CGPoint] = (0 ..< 40).map { CGPoint(x: 50.5, y: 78 - Double($0) * 2) }
+    let across: [CGPoint] = (0 ..< 40).map { CGPoint(x: 10 + Double($0) * 2, y: 40) }
+    let line = down + up + across
     var trace = InkTrace()
     trace.append(samples(line, width: 4))
     let path = InkTrace.path(trace.outline)
