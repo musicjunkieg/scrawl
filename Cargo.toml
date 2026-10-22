@@ -19,6 +19,7 @@ serde_json = "1.0.151"
 scrawl-bundle = { path = "crates/scrawl-bundle" }
 scrawl-capture = { path = "crates/scrawl-capture" }
 scrawl-core = { path = "crates/scrawl-core" }
+scrawl-route = { path = "crates/scrawl-route" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6.2"
@@ -93,9 +94,9 @@ windows = { version = "0.61.3", features = [
 embed-resource = "3"
 
 [workspace]
-members = ["crates/scrawl-bundle", "crates/scrawl-capture", "crates/scrawl-core"]
+members = ["crates/scrawl-bundle", "crates/scrawl-capture", "crates/scrawl-core", "crates/scrawl-route"]
 # Plain `cargo build` / `cargo test` cover the crates too, not only the app.
-default-members = [".", "crates/scrawl-bundle", "crates/scrawl-capture", "crates/scrawl-core"]
+default-members = [".", "crates/scrawl-bundle", "crates/scrawl-capture", "crates/scrawl-core", "crates/scrawl-route"]
 
 [profile.dev]
 debug = 0
