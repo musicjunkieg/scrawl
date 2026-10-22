@@ -4786,6 +4786,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "scrawl-wasm"
+version = "0.3.5"
+dependencies = [
+ "anyhow",
+ "scrawl-core",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "screencapturekit"
 version = "11.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
