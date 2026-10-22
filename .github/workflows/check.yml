@@ -65,3 +65,31 @@ jobs:
       - run: cargo build --locked -p scrawl-wasm --release --target wasm32-unknown-unknown
       - run: wasm-bindgen --target nodejs --out-dir target/scrawl-wasm-node target/wasm32-unknown-unknown/release/scrawl_wasm.wasm
       - run: node crates/scrawl-wasm/tests/node.mjs target/scrawl-wasm-node
+
+  web:
+    name: Web package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      # The CLI's version must match the `wasm-bindgen` in Cargo.lock.
+      - run: cargo install --locked wasm-bindgen-cli --version 0.2.129
+      - run: packages/scrawl-web/scripts/build-wasm.sh
+      - run: npm test
+        working-directory: packages/scrawl-web
+      # Records the test page in Chromium: tab capture, a click, ⇧ ink, a fake transcriber.
+      - run: npm install --no-save --prefix "$RUNNER_TEMP/pw" playwright@1.56.1
+      - run: "\"$RUNNER_TEMP/pw/node_modules/.bin/playwright\" install --with-deps chromium"
+      - run: node test/browser/run.mjs "$RUNNER_TEMP/bundle"
+        working-directory: packages/scrawl-web
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/pw/node_modules/playwright
