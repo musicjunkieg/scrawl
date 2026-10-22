@@ -56,7 +56,24 @@ try {
   await page.evaluate(async () => {
     console.error("card failed to save");
     await fetch("/api/cards?token=secret").catch(() => {});
+    // An opaque no-cors response that worked is not a failure.
+    await fetch(`http://localhost:${location.port}/test/browser/index.html`, { mode: "no-cors" }).catch(() => {});
+    // A live stream's duration is Infinity.
+    const canvas = Object.assign(document.createElement("canvas"), { width: 16, height: 16 });
+    canvas.getContext("2d").fillRect(0, 0, 8, 8); // a stream with no frames never plays
+    const video = Object.assign(document.createElement("video"), { muted: true, srcObject: canvas.captureStream() });
+    document.body.append(video);
+    await video.play();
+    video.pause(); // by now its duration is Infinity
   });
+  // A button inside an open shadow root is named itself, not by its host.
+  await page.evaluate(() => {
+    const host = document.createElement("div");
+    host.id = "host";
+    document.body.append(host);
+    host.attachShadow({ mode: "open" }).innerHTML = `<button aria-label="Inner">x</button>`;
+  });
+  await page.click("#host >> button");
   await page.waitForTimeout(900);
   // ⇧ ink: hold Shift and move the pointer around the card.
   await page.keyboard.down("Shift");
@@ -90,6 +107,9 @@ try {
   assert.ok(labels.includes("<button#move> “Move the card” (src/Card.tsx:12)"), JSON.stringify(labels));
   assert.ok(labels.some((l) => /^console error: card failed to save \(test\/browser\/run|^console error: card failed to save$/.test(l)), JSON.stringify(labels));
   assert.ok(labels.includes("GET /api/cards → 404"), JSON.stringify(labels));
+  assert.ok(!labels.some((l) => l.includes("→ failed") || l.includes("→ 0")), JSON.stringify(labels));
+  assert.ok(labels.some((l) => /^video .*paused at \d+:\d\d$/.test(l)), JSON.stringify(labels));
+  assert.ok(labels.includes("<button> “Inner”"), JSON.stringify(labels));
   assert.ok(!JSON.stringify(m).includes("secret"), "no query strings");
   assert.equal(m.strokes[0].on, "<div#card.card.moved> “A card”", JSON.stringify(m.strokes[0]));
   const restored = await page.evaluate(() => window.fetch === window.originals.fetch && console.error === window.originals.error);

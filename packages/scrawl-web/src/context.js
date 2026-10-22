@@ -122,7 +122,11 @@ export function watchPage(stamp) {
     target.addEventListener(type, handler, options);
     listeners.push(() => target.removeEventListener(type, handler, options));
   };
-  on(window, "pointerdown", (e) => push({ kind: "pointer", target: targetOf(e.target) }), { capture: true, passive: true });
+  // The first node of the composed path: inside an open shadow root `target` is only the host.
+  on(window, "pointerdown", (e) => push({ kind: "pointer", target: targetOf(e.composedPath()[0] ?? e.target) }), {
+    capture: true,
+    passive: true,
+  });
   let lastMark = 0;
   on(window, "pointermove", (e) => {
     if (!e.shiftKey) return;
@@ -140,7 +144,8 @@ export function watchPage(stamp) {
       push({
         kind: "media",
         event: type,
-        media: { src: clip(src, 60) || "", time: m.currentTime, duration: m.duration || 0, paused: m.paused },
+        // A live stream's duration is Infinity, which JSON would turn into null.
+        media: { src: clip(src, 60) || "", time: m.currentTime, duration: Number.isFinite(m.duration) ? m.duration : 0, paused: m.paused },
       });
     }, true);
   }
@@ -206,7 +211,8 @@ export function watchPage(stamp) {
       const pending = original.call(this, input, init);
       pending.then(
         (r) => {
-          if (!r.ok) failed(method, r.url || url, r.status, started);
+          // A no-cors response is opaque: status 0 even when it worked.
+          if (!r.ok && r.type !== "opaque" && r.type !== "opaqueredirect") failed(method, r.url || url, r.status, started);
         },
         () => failed(method, url, 0, started),
       );

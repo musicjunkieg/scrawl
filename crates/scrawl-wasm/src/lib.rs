@@ -110,7 +110,11 @@ pub fn compile(capture: Capture, frames: Vec<RgbaFrame>) -> Result<BuiltBundle> 
     let mut strokes = capture.strokes;
     if !capture.page.is_empty() {
         let start = capture.created_at_ms;
-        let seen = page::clean(capture.page, start, start + capture.duration_ms);
+        let seen = page::clean(
+            capture.page,
+            start,
+            start.saturating_add(capture.duration_ms),
+        );
         page::apply(&seen, start, &mut events, &mut strokes);
     }
     let options = BuildOptions {
