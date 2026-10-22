@@ -93,11 +93,15 @@ Goal: a web app records its own page and compiles the bundle in the browser (**n
 
 Goal: ScrawlKit builds bundles on the iPhone, with no Mac running Scrawl. Decided 2026-10-22 (decisions 5–7): a plain C interface rather than UniFFI, `ScrawlCore.xcframework` shipped through GitHub Releases, and on-device compile opt-in (`Scrawl.shared.compiles = .onDevice`; sending to the Mac stays the default). Three PRs:
 
-- **The C interface (in review, branch `claude/scrawl-ffi`):**
+- **The C interface (#36, merged):**
   - `scrawl_core::capture` now holds `Capture` and `compile`, `compile_with_full` and `keyframe_times`, moved from `scrawl-wasm` (which re-exports them), so the browser and apps share one input.
   - `crates/scrawl-ffi` (a static library, not published) wraps them in C, `include/scrawl.h`: `scrawl_compiler_new`, `_add_frame`, `_keyframe_times`, `_add_full_frame`, `_compile`, then a bundle's `_file_count`, `_file_name`, `_file_data` and `_summary`, each with its `_free`. Errors are NULL plus a message; a panic is caught and reported the same way.
   - It type-checks for `aarch64-apple-ios`, `aarch64-apple-ios-sim` and `aarch64-apple-darwin` from Linux. `tests/smoke.c` builds a bundle through the header under AddressSanitizer (`tests/smoke.sh`, in CI's Linux job); with a free left out it reports the leak.
-- **Next, the xcframework:** CI's macOS job builds `ScrawlCore.xcframework` (device, simulator, Mac), ScrawlKit gains a binary target and a Swift `ScrawlCompiler` wrapper, and CI runs `swift test`.
+- **The xcframework (in review, branch `claude/scrawlcore-xcframework`):**
+  - `scripts/build-xcframework.sh` builds `scrawl-ffi` for `aarch64-apple-ios`, `aarch64-apple-ios-sim` and a universal Mac slice (`aarch64`/`x86_64-apple-darwin`, `lipo`), and packs them with `scrawl.h` as the `ScrawlCore` module into `target/ScrawlCore.xcframework`. The static libraries also build from Linux (`cargo build -p scrawl-ffi --target aarch64-apple-ios`); the Mac slice links Core Text, Core Graphics, Core Foundation and `iconv`, iOS only libSystem.
+  - `Package.swift` links it only when `SCRAWL_CORE=1` (until a release publishes it), which also defines `SCRAWL_CORE` for the sources and tests, so without it ScrawlKit builds exactly as before.
+  - `BundleCompiler` (`Sources/ScrawlKit/BundleCompiler.swift`) wraps the C interface: `addFrame`, `keyframeTimes(capture:)`, `addFullFrame`, `compile(capture:)` returning a `Bundle` (`files`, `summary`, `write(to:)`); errors throw `BundleCompiler.Failure`.
+  - CI's `ScrawlKit` job (macOS): `swift build` without it, the xcframework, `swift test` with it (`BundleCompilerTests`), and `xcodebuild build` for iOS and the simulator.
 - **Then on-device compile:** `Scrawl.shared.compiles = .onDevice` decodes the movie with `AVAssetImageGenerator` (candidates at 480 px, keyframes at full size) and writes the bundle on the phone; checked on a real iPhone.
 
 After 8 comes phase 9 (ScrawlKit macOS), as in **Phases** below.

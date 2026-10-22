@@ -26,6 +26,32 @@ jobs:
       - run: cargo build --locked
       - run: cargo test --locked
 
+  scrawlkit:
+    name: ScrawlKit
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      # Without ScrawlCore, ScrawlKit builds as it always has.
+      - run: swift build
+      # The bundle compiler for apps, crates/scrawl-ffi, as ScrawlCore.xcframework.
+      - run: scripts/build-xcframework.sh
+      - run: swift test
+        env:
+          SCRAWL_CORE: "1"
+      - run: xcodebuild -list
+        env:
+          SCRAWL_CORE: "1"
+      - run: xcodebuild build -scheme ScrawlKit -destination 'generic/platform=iOS' -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
+        env:
+          SCRAWL_CORE: "1"
+
   windows:
     name: Windows
     runs-on: windows-latest
