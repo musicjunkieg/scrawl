@@ -4775,6 +4775,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scrawl-ffi"
+version = "0.3.5"
+dependencies = [
+ "scrawl-core",
+ "serde_json",
+]
+
+[[package]]
 name = "scrawl-route"
 version = "0.3.5"
 dependencies = [

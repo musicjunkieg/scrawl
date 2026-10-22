@@ -98,9 +98,9 @@ scrawl-route = { path = "crates/scrawl-route", features = ["fake-api"] }
 embed-resource = "3"
 
 [workspace]
-members = ["crates/scrawl-bundle", "crates/scrawl-capture", "crates/scrawl-core", "crates/scrawl-route", "crates/scrawl-wasm"]
+members = ["crates/scrawl-bundle", "crates/scrawl-capture", "crates/scrawl-core", "crates/scrawl-route", "crates/scrawl-wasm", "crates/scrawl-ffi"]
 # Plain `cargo build` / `cargo test` cover the crates too, not only the app.
-default-members = [".", "crates/scrawl-bundle", "crates/scrawl-capture", "crates/scrawl-core", "crates/scrawl-route", "crates/scrawl-wasm"]
+default-members = [".", "crates/scrawl-bundle", "crates/scrawl-capture", "crates/scrawl-core", "crates/scrawl-route", "crates/scrawl-wasm", "crates/scrawl-ffi"]
 
 [profile.dev]
 debug = 0
