@@ -15,6 +15,7 @@ use serde::Deserialize;
 
 use crate::capture::{LiveOverlayEvent, SharedCaptureTelemetry, scrawl_log};
 use crate::delivery::{Delivery, Outcome};
+pub use scrawl_route::web::constant_time_eq;
 use crate::helper::{self, FrameTimes, PhoneDevice};
 use crate::model::{
     CaptureMode, ContextChange, DeviceInfo, InteractionEvent, RgbaFrame, ScrawlBundle, ScreenSpan,
@@ -1104,20 +1105,6 @@ const REPLY_WAIT_DEFAULT: Duration = Duration::from_secs(25);
 /// Over USB the phone gives up 30 s after it stopped, and the copy takes some of that.
 const USB_REPLY_WAIT: Duration = Duration::from_secs(15);
 
-/// Constant-time comparison for bearer tokens so timing does not leak token bytes.
-pub fn constant_time_eq(provided: &str, expected: &str) -> bool {
-    let a = provided.as_bytes();
-    let b = expected.as_bytes();
-    if b.is_empty() {
-        return false;
-    }
-    let mut diff = (a.len() ^ b.len()) as u8;
-    for (i, &expected_byte) in b.iter().enumerate() {
-        let provided_byte = a.get(i).copied().unwrap_or(0);
-        diff |= provided_byte ^ expected_byte;
-    }
-    diff == 0 && a.len() == b.len()
-}
 
 fn bearer_token(header: &str) -> Option<&str> {
     header.lines().skip(1).find_map(|line| {
@@ -2035,21 +2022,6 @@ mod tests {
             (movie.clone(), Some(json.clone()))
         );
         std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn constant_time_compare_rejects_mismatches_and_empty_secrets() {
-        let token = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90";
-        assert!(constant_time_eq(token, token));
-        assert!(!constant_time_eq("", token));
-        assert!(!constant_time_eq(token, ""));
-        assert!(!constant_time_eq("", ""));
-        assert!(!constant_time_eq("short", token));
-        assert!(!constant_time_eq(
-            "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f91",
-            token
-        ));
-        assert!(!constant_time_eq(&format!("{token}extra"), token));
     }
 
     #[test]
