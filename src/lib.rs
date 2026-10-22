@@ -1400,7 +1400,7 @@ pub fn run() -> Result<()> {
                     .with_context(|| format!("Couldn't read the front tab of {browser}"))?,
                 (None, None) => anyhow::bail!("Pass --url or --browser"),
             };
-            match routing::route(&url, &routing::Hooks::default()) {
+            match routing::route(&url, &routing::hooks()) {
                 Ok(dest) => println!("{}", serde_json::to_string_pretty(&dest)?),
                 Err(reason) => println!("{url}: clipboard only ({reason})"),
             }
