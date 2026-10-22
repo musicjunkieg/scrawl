@@ -4779,6 +4779,8 @@ name = "scrawl-route"
 version = "0.3.5"
 dependencies = [
  "anyhow",
+ "dirs 7.0.0",
+ "scrawl-bundle",
  "serde",
  "serde_json",
 ]

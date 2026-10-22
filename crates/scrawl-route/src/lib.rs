@@ -4,6 +4,8 @@
 //!   it, and the queue that retries a send that failed.
 //! - [`opencode`]: OpenCode's session API (look a session up, search the open root sessions, pick
 //!   the one a capture goes to), over a transport the caller passes in.
+//! - [`smart`]: where a capture goes, decided from the evidence gathered around it, with no I/O
+//!   and no clock, so the same evidence always gives the same decision (`docs/routing.md`).
 //! - [`web`]: the `/sdk.js` script a dev page loads to say which session it belongs to, the
 //!   registrations it makes, and the HTTP routes that serve them.
 //! - [`url`]: the scheme, host and port of a page's URL, and whether the host is this machine.
@@ -13,6 +15,7 @@
 
 pub mod delivery;
 pub mod opencode;
+pub mod smart;
 pub mod url;
 pub mod web;
 
