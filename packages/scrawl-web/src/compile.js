@@ -17,25 +17,46 @@ export function compileFrames(Compiler, capture, frames) {
   }
 }
 
+/** The candidates' longest side (px), as the Mac app's: they only feed keyframe selection. */
+export const CANDIDATE_EDGE = 480;
+
 /**
- * Like `compileFrames`, but `feed(add)` hands frames over one at a time (it may be async),
- * so a caller can decode each frame just before adding it instead of holding them all.
+ * Compiles `capture` from sampled `frames` (`{ t, blob }`) without holding them all at full
+ * size: each is decoded at `CANDIDATE_EDGE` px to pick the keyframes, then only the keyframes
+ * are decoded again at full size for the bundle's images. `decode(frame, maxEdge?)` gives RGBA
+ * pixels (`decodeFrame`, in a page or Worker).
  * @param {{ new(): any }} Compiler
  * @param {object} capture
- * @param {(add: (frame: { t: number, width: number, height: number, data: Uint8Array | Uint8ClampedArray }) => void) => void | Promise<void>} feed
+ * @param {Array<{ t: number }>} frames
+ * @param {(frame: any, maxEdge?: number) => Promise<{ t: number, width: number, height: number, data: Uint8Array | Uint8ClampedArray }>} decode
  */
-export async function compileStreaming(Compiler, capture, feed) {
+export async function compileSampled(Compiler, capture, frames, decode) {
   const compiler = new Compiler();
   try {
-    await feed((f) => addFrame(compiler, f));
+    for (const frame of frames) addFrame(compiler, await decode(frame, CANDIDATE_EDGE));
+    for (const t of compiler.keyframeTimes(JSON.stringify(capture))) {
+      const frame = nearest(frames, t);
+      if (frame) {
+        const full = await decode(frame);
+        compiler.addFullFrame(t, full.width, full.height, bytes(full.data));
+      }
+    }
     return collect(compiler, capture);
   } finally {
     compiler.free?.();
   }
 }
 
+function nearest(frames, t) {
+  let best = null;
+  for (const f of frames) if (!best || Math.abs(f.t - t) < Math.abs(best.t - t)) best = f;
+  return best;
+}
+
+const bytes = (data) => (data instanceof Uint8Array ? data : new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+
 function addFrame(compiler, f) {
-  compiler.addFrame(f.t, f.width, f.height, f.data instanceof Uint8Array ? f.data : new Uint8Array(f.data.buffer, f.data.byteOffset, f.data.byteLength));
+  compiler.addFrame(f.t, f.width, f.height, bytes(f.data));
 }
 
 function collect(compiler, capture) {
@@ -48,12 +69,16 @@ function collect(compiler, capture) {
   }
 }
 
-/** Decodes a sampled frame's image back to RGBA pixels (in a page or a Worker). */
-export async function decodeFrame({ t, blob }) {
+/**
+ * Decodes a sampled frame's image back to RGBA pixels (in a page or a Worker), scaled down to
+ * at most `maxEdge` px on its longest side when given.
+ */
+export async function decodeFrame({ t, blob }, maxEdge = Infinity) {
   const bitmap = await createImageBitmap(blob);
-  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+  const canvas = new OffscreenCanvas(Math.max(1, Math.round(bitmap.width * scale)), Math.max(1, Math.round(bitmap.height * scale)));
   const context = canvas.getContext("2d", { willReadFrequently: true });
-  context.drawImage(bitmap, 0, 0);
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   bitmap.close?.();
   const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
   return { t, width: canvas.width, height: canvas.height, data };
