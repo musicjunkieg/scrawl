@@ -3,17 +3,16 @@
 // `{ id, error }`.
 
 import init, { Compiler } from "../wasm/scrawl_wasm.js";
-import { compileStreaming, decodeFrame } from "./compile.js";
+import { compileSampled, decodeFrame } from "./compile.js";
 
 const ready = init();
 
 self.onmessage = async ({ data: { id, capture, frames } }) => {
   try {
     await ready;
-    // One decoded frame at a time: RGBA is 4 bytes a pixel, far more than the WebP blobs.
-    const built = await compileStreaming(Compiler, capture, async (add) => {
-      for (const frame of frames) add(await decodeFrame(frame));
-    });
+    // Candidates small, then only the keyframes at full size: RGBA is 4 bytes a pixel, far more
+    // than the WebP blobs.
+    const built = await compileSampled(Compiler, capture, frames, decodeFrame);
     self.postMessage({ id, ...built }, built.files.map(([, bytes]) => bytes.buffer));
   } catch (error) {
     self.postMessage({ id, error: String(error?.message || error) });

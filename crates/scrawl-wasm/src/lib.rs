@@ -8,10 +8,13 @@
 //! ```js
 //! const compiler = new Compiler();
 //! compiler.addFrame(t, imageData.width, imageData.height, imageData.data);
+//! // Optionally, with small candidates: the keyframes again at full size.
+//! for (const t of compiler.keyframeTimes(JSON.stringify(capture))) compiler.addFullFrame(t, …);
 //! const bundle = compiler.compile(JSON.stringify(capture));
 //! for (const name of bundle.fileNames()) save(name, bundle.file(name));
 //! ```
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -86,19 +89,34 @@ fn no_transcript() -> TranscriptData {
 /// Builds the bundle for `capture` from its candidate `frames` (any order; each is a moment the
 /// page was seen).
 pub fn compile(capture: Capture, frames: Vec<RgbaFrame>) -> Result<BuiltBundle> {
-    ensure!(!frames.is_empty(), "A capture needs at least one frame");
-    for frame in &frames {
-        // Checked: on wasm `usize` is 32 bits, and 65536×65536×4 would wrap to 0.
-        let expected = (frame.width as usize)
-            .checked_mul(frame.height as usize)
-            .and_then(|pixels| pixels.checked_mul(4));
-        ensure!(
-            frame.width > 0 && frame.height > 0 && expected == Some(frame.rgba.len()),
-            "The frame at {} ms isn't {}×{} RGBA pixels",
-            frame.t_ms,
-            frame.width,
-            frame.height
-        );
+    compile_with_full(capture, frames, Vec::new())
+}
+
+/// The times (ms) of the keyframes `compile` picks from these candidate `frames`. A caller that
+/// holds its frames small decodes just these again at full size for `compile_with_full`.
+pub fn keyframe_times(capture: &Capture, frames: &[RgbaFrame]) -> Result<Vec<u64>> {
+    check_frames(frames)?;
+    let (events, strokes) = page_applied(capture);
+    Ok(scrawl_core::build::keyframe_times(
+        frames,
+        &strokes,
+        &capture.flags,
+        &events,
+        &capture.transcript,
+        capture.duration_ms,
+    ))
+}
+
+/// `compile`, with `full`: the frames at `keyframe_times` again at full size, which the bundle's
+/// images are made from instead of the candidates. Empty `full` uses the candidates.
+pub fn compile_with_full(
+    capture: Capture,
+    frames: Vec<RgbaFrame>,
+    full: Vec<RgbaFrame>,
+) -> Result<BuiltBundle> {
+    check_frames(&frames)?;
+    if !full.is_empty() {
+        check_frames(&full)?;
     }
     let directory = PathBuf::from(
         capture
@@ -106,27 +124,23 @@ pub fn compile(capture: Capture, frames: Vec<RgbaFrame>) -> Result<BuiltBundle> 
             .clone()
             .unwrap_or_else(|| format!("{}.scrawl", capture.id)),
     );
-    let mut events = capture.events;
-    let mut strokes = capture.strokes;
-    if !capture.page.is_empty() {
-        let start = capture.created_at_ms;
-        let seen = page::clean(
-            capture.page,
-            start,
-            start.saturating_add(capture.duration_ms),
-        );
-        page::apply(&seen, start, &mut events, &mut strokes);
-    }
+    let (events, strokes) = page_applied(&capture);
     let options = BuildOptions {
         agent_context: capture.agent_context,
         autocrop: None,
         created_at_ms: capture.created_at_ms,
         logger: None,
     };
+    let full = (!full.is_empty()).then(|| {
+        let full = RefCell::new(Some(full));
+        Box::new(move |_: &[u64]| Ok(full.borrow_mut().take().unwrap_or_default()))
+            as scrawl_core::build::FullFrames
+    });
     let extras = SourceExtras {
         source: capture.source,
         context: capture.context,
         flags: capture.flags,
+        full_frames: full,
         ..SourceExtras::default()
     };
     scrawl_core::build::build_bundle(
@@ -146,11 +160,43 @@ pub fn compile(capture: Capture, frames: Vec<RgbaFrame>) -> Result<BuiltBundle> 
     )
 }
 
+fn check_frames(frames: &[RgbaFrame]) -> Result<()> {
+    ensure!(!frames.is_empty(), "A capture needs at least one frame");
+    for frame in frames {
+        // Checked: on wasm `usize` is 32 bits, and 65536×65536×4 would wrap to 0.
+        let expected = (frame.width as usize)
+            .checked_mul(frame.height as usize)
+            .and_then(|pixels| pixels.checked_mul(4));
+        ensure!(
+            frame.width > 0 && frame.height > 0 && expected == Some(frame.rgba.len()),
+            "The frame at {} ms isn't {}×{} RGBA pixels",
+            frame.t_ms,
+            frame.width,
+            frame.height
+        );
+    }
+    Ok(())
+}
+
+/// The capture's events and strokes once what the page saw names them (`page::apply`).
+fn page_applied(capture: &Capture) -> (Vec<InteractionEvent>, Vec<Stroke>) {
+    let mut events = capture.events.clone();
+    let mut strokes = capture.strokes.clone();
+    if !capture.page.is_empty() {
+        let start = capture.created_at_ms;
+        let end = start.saturating_add(capture.duration_ms);
+        let seen = page::clean(capture.page.clone(), start, end);
+        page::apply(&seen, start, &mut events, &mut strokes);
+    }
+    (events, strokes)
+}
+
 /// Collects a capture's frames, then builds its bundle.
 #[wasm_bindgen]
 #[derive(Default)]
 pub struct Compiler {
     frames: Vec<RgbaFrame>,
+    full: Vec<RgbaFrame>,
 }
 
 #[wasm_bindgen]
@@ -160,17 +206,28 @@ impl Compiler {
         Self::default()
     }
 
-    /// Adds the page as it looked `t_ms` into the capture: `rgba` is `ImageData.data`.
+    /// Adds the page as it looked `t_ms` into the capture: `rgba` is `ImageData.data`. These
+    /// candidates can be small (the Mac app uses 480 px) when the keyframes are added again at
+    /// full size with `addFullFrame`.
     #[wasm_bindgen(js_name = addFrame)]
     pub fn add_frame(&mut self, t_ms: f64, width: u32, height: u32, rgba: Vec<u8>) {
-        let frame = RgbaFrame {
-            t_ms: t_ms.max(0.0).round() as u64,
-            width,
-            height,
-            rgba,
-            badge_top_right: false,
-        };
-        self.frames.push(frame);
+        self.frames.push(rgba_frame(t_ms, width, height, rgba));
+    }
+
+    /// The times (ms) of the keyframes `compile` will pick from the candidates added so far, for
+    /// `capture` (a [`Capture`] as JSON).
+    #[wasm_bindgen(js_name = keyframeTimes)]
+    pub fn keyframe_times(&self, capture: &str) -> Result<Vec<f64>, JsError> {
+        let capture = parse(capture)?;
+        let times = keyframe_times(&capture, &self.frames).map_err(js_error)?;
+        Ok(times.into_iter().map(|t| t as f64).collect())
+    }
+
+    /// Adds a keyframe at full size, at one of `keyframeTimes`; the bundle's images are made from
+    /// these instead of the candidates.
+    #[wasm_bindgen(js_name = addFullFrame)]
+    pub fn add_full_frame(&mut self, t_ms: f64, width: u32, height: u32, rgba: Vec<u8>) {
+        self.full.push(rgba_frame(t_ms, width, height, rgba));
     }
 
     /// How many frames were added.
@@ -182,12 +239,28 @@ impl Compiler {
     /// Builds the bundle from the frames added so far and `capture` (a [`Capture`] as JSON). The
     /// frames are used up.
     pub fn compile(&mut self, capture: &str) -> Result<Bundle, JsError> {
-        let capture: Capture = serde_json::from_str(capture)
-            .context("The capture isn't valid JSON for a Scrawl capture")
-            .map_err(js_error)?;
-        let built = compile(capture, std::mem::take(&mut self.frames)).map_err(js_error)?;
+        let capture = parse(capture)?;
+        let frames = std::mem::take(&mut self.frames);
+        let full = std::mem::take(&mut self.full);
+        let built = compile_with_full(capture, frames, full).map_err(js_error)?;
         Ok(Bundle { built })
     }
+}
+
+fn rgba_frame(t_ms: f64, width: u32, height: u32, rgba: Vec<u8>) -> RgbaFrame {
+    RgbaFrame {
+        t_ms: t_ms.max(0.0).round() as u64,
+        width,
+        height,
+        rgba,
+        badge_top_right: false,
+    }
+}
+
+fn parse(capture: &str) -> Result<Capture, JsError> {
+    serde_json::from_str(capture)
+        .context("The capture isn't valid JSON for a Scrawl capture")
+        .map_err(js_error)
 }
 
 fn js_error(error: anyhow::Error) -> JsError {
@@ -309,6 +382,44 @@ mod tests {
                 "GET /api/cards → 404",
             ]
         );
+    }
+
+    /// A PNG's width and height, from its IHDR chunk.
+    fn png_size(png: &[u8]) -> (u32, u32) {
+        let be = |i: usize| u32::from_be_bytes(png[i..i + 4].try_into().unwrap());
+        (be(16), be(20))
+    }
+
+    #[test]
+    fn small_candidates_pick_the_keyframes_and_full_frames_draw_them() {
+        let small = frames();
+        let times = keyframe_times(&capture(), &small).unwrap();
+        assert!(!times.is_empty());
+        let full: Vec<RgbaFrame> = times
+            .iter()
+            .map(|&t| RgbaFrame::new(t, 128, 80, vec![(t / 10) as u8; 128 * 80 * 4]))
+            .collect();
+        let built = compile_with_full(capture(), small, full).unwrap();
+        let picked: Vec<u64> = built.bundle.keyframes.iter().map(|k| k.t).collect();
+        assert_eq!(
+            picked, times,
+            "compile picks the keyframes keyframe_times named"
+        );
+        for (name, png) in built.files.iter().filter(|(n, _)| n.starts_with("frames/")) {
+            assert_eq!(
+                png_size(png),
+                (128, 80),
+                "{name} is drawn from its full frame"
+            );
+        }
+        // Without full frames, the candidates are the keyframes.
+        let built = compile(capture(), frames()).unwrap();
+        let (name, png) = built
+            .files
+            .iter()
+            .find(|(n, _)| n.starts_with("frames/"))
+            .unwrap();
+        assert_eq!(png_size(png), (64, 40), "{name}");
     }
 
     #[test]

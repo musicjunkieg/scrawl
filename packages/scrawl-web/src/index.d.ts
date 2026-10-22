@@ -65,7 +65,7 @@ export function compileFrames(
   capture: Record<string, unknown>,
   frames: Array<{ t: number; width: number; height: number; data: Uint8Array | Uint8ClampedArray }>,
 ): { files: Array<[string, Uint8Array]>; summary: string; manifest: Record<string, unknown> };
-export function decodeFrame(frame: { t: number; blob: Blob }): Promise<{
+export function decodeFrame(frame: { t: number; blob: Blob }, maxEdge?: number): Promise<{
   t: number;
   width: number;
   height: number;

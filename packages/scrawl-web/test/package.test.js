@@ -10,6 +10,7 @@ import { test } from "node:test";
 import { changed, sampleSize, thumbnail } from "../src/frames.js";
 import { SCALE, fraction, strokeOf } from "../src/input.js";
 import { compileFrames, missingTranscript, normalizeTranscript, zip } from "../src/index.js";
+import { CANDIDATE_EDGE, compileSampled } from "../src/compile.js";
 import { listen } from "../src/webspeech.js";
 
 test("zip holds every file under the bundle's folder", () => {
@@ -133,4 +134,39 @@ test("a capture compiles into a bundle through the browser wasm", { skip: !exist
   assert.ok(built.manifest.keyframes.some((k) => k.markId === "m1"));
   assert.match(built.summary, /save does nothing/);
   assert.match(built.summary, /url: http:\/\/localhost:5173\/settings/);
+});
+
+test("sampled frames pick keyframes small and draw them at full size", { skip: !existsSync(wasm) && "run npm run build:wasm" }, async () => {
+  const { initSync, Compiler } = await import(wasm);
+  initSync({ module: readFileSync(new URL("../wasm/scrawl_wasm_bg.wasm", import.meta.url)) });
+  const [width, height] = [1600, 1000];
+  // A card that moves every frame, so the frames differ.
+  const decode = async ({ t }, maxEdge = Infinity) => {
+    const scale = Math.min(1, maxEdge / width);
+    const [w, h] = [Math.round(width * scale), Math.round(height * scale)];
+    const data = new Uint8ClampedArray(w * h * 4).fill(240);
+    const x0 = Math.round(((t / 250) * 90 * scale) % (w - 100 * scale));
+    for (let y = Math.round(200 * scale); y < Math.round(500 * scale); y++) {
+      for (let x = x0; x < x0 + Math.round(300 * scale); x++) data.set([30, 90, 200, 255], (y * w + x) * 4);
+    }
+    decoded.push(w);
+    return { t, width: w, height: h, data };
+  };
+  const decoded = [];
+  const frames = Array.from({ length: 24 }, (_, i) => ({ t: i * 250 }));
+  const capture = {
+    id: "sampled",
+    target: { mode: "window", app: "page", displayId: 0, frame: { x: 0, y: 0, width, height, scale: 1 } },
+    durationMs: 6000,
+    events: [{ kind: "click", t: 2600, x: 0.5, y: 0.5 }],
+  };
+  const built = await compileSampled(Compiler, capture, frames, decode);
+  const small = decoded.filter((w) => w === CANDIDATE_EDGE).length;
+  const full = decoded.filter((w) => w === width).length;
+  assert.equal(small, frames.length, "every frame once as a candidate");
+  assert.equal(full, built.manifest.keyframes.length, "only the keyframes at full size");
+  assert.ok(full < frames.length, `${full} of ${frames.length}`);
+  for (const [name, png] of built.files.filter(([n]) => n.startsWith("frames/"))) {
+    assert.equal(Buffer.from(png).readUInt32BE(16), width, `${name} is full size`);
+  }
 });

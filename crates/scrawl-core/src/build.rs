@@ -301,6 +301,53 @@ pub fn build_bundle(
     Ok(built)
 }
 
+/// The ink's marks, then a flag mark for each flagged moment (ms).
+fn marks_with_flags(strokes: &[Stroke], flags: &[u64]) -> Vec<Mark> {
+    let mut marks = marks_of(strokes);
+    for (i, &t) in flags.iter().enumerate() {
+        marks.push(Mark {
+            id: format!("f{}", i + 1),
+            strokes: Vec::new(),
+            t0: t,
+            t1: t,
+            box_norm: [0.0, 0.0, 1.0, 1.0],
+            shape: Shape::Flag,
+            from: None,
+            to: None,
+            pin: None,
+            on: None,
+            description: "flagged this moment".into(),
+            frame: None,
+        });
+    }
+    marks
+}
+
+/// The times (ms) of the keyframes `build_bundle` picks from these candidate frames, so a
+/// caller holding them small can decode just those again at full size and hand them over
+/// through `SourceExtras::full_frames`.
+pub fn keyframe_times(
+    frames: &[RgbaFrame],
+    strokes: &[Stroke],
+    flags: &[u64],
+    events: &[InteractionEvent],
+    transcript: &TranscriptData,
+    duration_ms: u64,
+) -> Vec<u64> {
+    let mut marks = marks_with_flags(strokes, flags);
+    select_keyframes(
+        frames,
+        strokes,
+        &mut marks,
+        events,
+        transcript,
+        keyframe_budget(duration_ms),
+    )
+    .into_iter()
+    .map(|(kf, _)| kf.t)
+    .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_files(
     bundle_dir: &Path,
@@ -321,23 +368,7 @@ fn build_files(
         .timings
         .started_at
         .unwrap_or_else(crate::clock::Instant::now);
-    let mut marks = marks_of(&strokes);
-    for (i, &t) in extras.flags.iter().enumerate() {
-        marks.push(Mark {
-            id: format!("f{}", i + 1),
-            strokes: Vec::new(),
-            t0: t,
-            t1: t,
-            box_norm: [0.0, 0.0, 1.0, 1.0],
-            shape: Shape::Flag,
-            from: None,
-            to: None,
-            pin: None,
-            on: None,
-            description: "flagged this moment".into(),
-            frame: None,
-        });
-    }
+    let mut marks = marks_with_flags(&strokes, &extras.flags);
     let started = crate::clock::Instant::now();
     let selected = select_keyframes(
         &frames,
