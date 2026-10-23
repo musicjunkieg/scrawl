@@ -7,15 +7,18 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use anyhow::{Result, ensure};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::build::{BuildOptions, BuiltBundle, SourceExtras};
-use crate::model::{InteractionEvent, RgbaFrame, Stroke, TargetInfo, TranscriptData};
+use crate::model::{
+    ContextChange, DeviceInfo, InteractionEvent, RgbaFrame, ScreenSpan, Stroke, TargetInfo,
+    TranscriptData,
+};
 use crate::page;
 
 /// What a recorder (a page, an app) captured, besides its frames. Field names are `scrawl.json`'s (camelCase), and
 /// the nested types are its types.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Capture {
     /// `scrawl.json`'s `id`; the bundle is `<id>.scrawl`.
@@ -45,9 +48,17 @@ pub struct Capture {
     /// Where the capture came from (`"web"`, say).
     #[serde(default)]
     pub source: Option<String>,
-    /// What the page said about itself (route, build, user), shown in `summary.md`.
+    /// What the page or app said about itself (route, build, user), shown in `summary.md`.
     #[serde(default)]
     pub context: BTreeMap<String, String>,
+    /// Changes to `context` while recording, and the app's named screens (ScrawlKit).
+    #[serde(default)]
+    pub context_changes: Vec<ContextChange>,
+    #[serde(default)]
+    pub screens: Vec<ScreenSpan>,
+    /// The phone an app recording was made on (ScrawlKit).
+    #[serde(default)]
+    pub device: Option<DeviceInfo>,
     /// The names of a movie and an `audio.wav` the caller stores beside the bundle.
     #[serde(default)]
     pub video: Option<String>,
@@ -59,7 +70,8 @@ pub struct Capture {
     /// What the page saw, in `sdk.js`'s shape at epoch ms (`page::Event`): the element and
     /// component under clicks and ⇧ marks, console errors, failed requests and video playback.
     /// They name the capture's clicks and strokes and add app events (`page::apply`).
-    #[serde(default)]
+    /// Only read: a page's events are cleaned and applied when compiling.
+    #[serde(default, skip_serializing)]
     pub page: Vec<page::Event>,
 }
 
@@ -126,7 +138,10 @@ pub fn compile_with_full(
     });
     let extras = SourceExtras {
         source: capture.source,
+        device: capture.device,
         context: capture.context,
+        context_changes: capture.context_changes,
+        screens: capture.screens,
         flags: capture.flags,
         full_frames: full,
         ..SourceExtras::default()
