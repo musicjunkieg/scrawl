@@ -280,6 +280,42 @@ try {
     }
   });
   assert.deepEqual(refusedLate, { failure: "NotAllowedError", sampled: 0 });
+  // Through stop(): it fails with that reason, and leaves no tab capture or Web Speech running.
+  at("checking a recording whose play() is refused late");
+  const failedLate = await page.evaluate(async () => {
+    const { createScrawl } = await import("/src/index.js");
+    const { FIRST_FRAME_WAIT } = await import("/src/frames.js");
+    let listening = 0;
+    window.SpeechRecognition = class {
+      start() {
+        listening++;
+      }
+      stop() {
+        listening--;
+        setTimeout(() => this.onend?.());
+      }
+    };
+    // A tab that never sends a frame, so the refusal is all there is.
+    const display = Object.assign(document.createElement("canvas"), { width: 64, height: 40 }).captureStream();
+    const media = navigator.mediaDevices;
+    const getDisplayMedia = media.getDisplayMedia;
+    media.getDisplayMedia = async () => display;
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = () =>
+      new Promise((_, reject) => setTimeout(() => reject(new DOMException("no", "NotAllowedError")), FIRST_FRAME_WAIT + 200));
+    try {
+      const scrawl = createScrawl({ transcribe: "web-speech" });
+      await scrawl.start();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const error = await scrawl.stop().then(() => null, (e) => e.name);
+      return { error, listening, live: display.getTracks().some((t) => t.readyState === "live") };
+    } finally {
+      HTMLMediaElement.prototype.play = play;
+      media.getDisplayMedia = getDisplayMedia;
+      delete window.SpeechRecognition;
+    }
+  });
+  assert.deepEqual(failedLate, { error: "NotAllowedError", listening: 0, live: false });
 
   clearTimeout(watchdog);
   console.log(`ok: ${bundle.files.length} files, ${m.keyframes.length} keyframes, ${m.marks.length} marks, built in ${ms} ms → ${out}`);

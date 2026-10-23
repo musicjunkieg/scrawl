@@ -106,6 +106,7 @@ export async function sampleFrames(stream, now, { interval = 500, maxEdge = 1600
     get failure() {
       return failure;
     },
+    /** Ends sampling and hands back the frames, after one last sample. */
     async stop() {
       stopped = true;
       clearInterval(timer);
