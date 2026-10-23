@@ -1,11 +1,14 @@
 // swift-tools-version: 6.2
+import Foundation
 import PackageDescription
 
 // ScrawlCore.xcframework is Scrawl's bundle compiler (crates/scrawl-ffi), built by
 // scripts/build-xcframework.sh into target/. With it, ScrawlKit's `BundleCompiler` builds bundles
-// on the device. Until a release publishes it, it's linked only when SCRAWL_CORE=1; without it
-// ScrawlKit builds as before and `BundleCompiler` is absent.
-let core = Context.environment["SCRAWL_CORE"] == "1"
+// on the device. Until a release publishes it, it's linked once it has been built (or with
+// SCRAWL_CORE=1; SCRAWL_CORE=0 leaves it out); without it ScrawlKit builds as before and
+// `BundleCompiler` is absent. Xcode opened from the Finder sees no environment, hence the file.
+let core = Context.environment["SCRAWL_CORE"].map { $0 == "1" }
+  ?? FileManager.default.fileExists(atPath: Context.packageDirectory + "/target/ScrawlCore.xcframework")
 // `#if SCRAWL_CORE` in the sources and tests, so a test can't be compiled out silently.
 let swiftSettings: [SwiftSetting] = [.swiftLanguageMode(.v5)] + (core ? [.define("SCRAWL_CORE")] : [])
 

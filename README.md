@@ -408,7 +408,7 @@ Each recording then becomes `Documents/Scrawl/<stamp>.scrawl` on the phone, buil
 compiler as the Mac's, with `recording.mp4` and `timeline.json` inside. The narration is transcribed
 offline with Apple's speech recognition, which needs `NSSpeechRecognitionUsageDescription` in the
 Info.plist; iOS asks once. Without the key, or if the person declines, the bundle has no transcript
-and `summary.md` says why. With `.onDevice`, ScrawlKit is active without pairing.
+and `summary.md` says why. With `.onDevice`, ScrawlKit is active without pairing. `Examples/ScrawlDemo.swiftpm` is a small app set up this way, to try on an iPhone (its README has the steps).
 
 `Scrawl.shared.captureMethod` picks how the video is made:
 

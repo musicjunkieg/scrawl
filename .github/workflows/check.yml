@@ -40,6 +40,8 @@ jobs:
           cache-on-failure: true
       # Without ScrawlCore, ScrawlKit builds as it always has.
       - run: swift build
+        env:
+          SCRAWL_CORE: "0"
       # The bundle compiler for apps, crates/scrawl-ffi, as ScrawlCore.xcframework.
       - run: scripts/build-xcframework.sh
       - run: swift test
@@ -49,6 +51,11 @@ jobs:
         env:
           SCRAWL_CORE: "1"
       - run: xcodebuild build -scheme ScrawlKit -destination 'generic/platform=iOS' -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
+        env:
+          SCRAWL_CORE: "1"
+      # The demo app (Examples/ScrawlDemo.swiftpm), which picks ScrawlCore up from target/.
+      - run: xcodebuild build -scheme ScrawlDemo -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
+        working-directory: Examples/ScrawlDemo.swiftpm
         env:
           SCRAWL_CORE: "1"
 

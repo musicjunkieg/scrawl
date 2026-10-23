@@ -110,6 +110,7 @@ Goal: ScrawlKit builds bundles on the iPhone, with no Mac running Scrawl. Decide
     - While it builds, the app holds iOS background time, and a `<stamp>.building` marker beside the movie lets a build iOS ended (the app killed in the background) run again the next time `compiles = .onDevice` is set, handing its bundle to `onBundle` only. A failed write removes the partial `<stamp>.scrawl`.
     - The bundle goes to `onBundle`, or the share sheet when `sharesWhenDone`. The strip says "Building…", then "Saved on this iPhone" (`IngestReply.onPhone`), or "Couldn't build it here" with Share (`Failure.notBuilt`).
     - `isActive` (paired, or `.onDevice` with ScrawlCore linked) replaces `isConfigured` where ScrawlKit decides whether to wake up, so on-device works without pairing.
+    - `Examples/ScrawlDemo.swiftpm` is an app package (Xcode opens it and runs it on an iPhone) with `.onDevice` set, and its README is the device test. `Package.swift` links ScrawlCore once `target/ScrawlCore.xcframework` exists (or with `SCRAWL_CORE=1`; `0` leaves it out), since Xcode opened from the Finder has no environment; CI builds the demo for the simulator.
     - Tests: `OnDeviceTests.swift` (the grouping runs anywhere; CI's Mac also writes a movie with `AVAssetWriter` and builds it). Still to do: the real-iPhone check (speech permission, a long recording's memory and time).
 
 After 8 comes phase 9 (ScrawlKit macOS), as in **Phases** below.
