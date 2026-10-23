@@ -62,7 +62,9 @@ export async function sampleFrames(stream, now, { interval = 500, maxEdge = 1600
   const context = canvas.getContext("2d", { willReadFrequently: true });
 
   const sample = (force = false) => {
-    if (paused > 0 || !video.videoWidth || frames.length >= maxFrames) return pending;
+    // A size can come before the picture: without current data the canvas would be blank.
+    const ready = video.readyState >= video.HAVE_CURRENT_DATA && video.videoWidth;
+    if (paused > 0 || !ready || frames.length >= maxFrames) return pending;
     const t = now();
     const { width, height } = sampleSize(video.videoWidth, video.videoHeight, maxEdge);
     canvas.width = width;
@@ -80,7 +82,9 @@ export async function sampleFrames(stream, now, { interval = 500, maxEdge = 1600
   };
   sample(true);
   // Without a frame yet, the first one is sampled when it arrives.
-  if (!video.videoWidth) video.addEventListener("loadeddata", () => sample(true), { once: true });
+  if (video.readyState < video.HAVE_CURRENT_DATA) {
+    video.addEventListener("loadeddata", () => sample(true), { once: true });
+  }
   const timer = setInterval(() => sample(false), interval);
   return {
     /** Samples now, even when nothing changed (a click, the start of ink). */
