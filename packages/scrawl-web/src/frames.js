@@ -50,9 +50,15 @@ export async function sampleFrames(stream, now, { interval = 500, maxEdge = 1600
   video.playsInline = true;
   video.srcObject = stream;
   // `play()` resolves at the first frame, which a static tab can be slow to send (and a headless
-  // browser may never send): wait a moment for it, never forever. A refusal still throws.
+  // browser may never send): wait a moment for it, never forever. A refusal in that moment
+  // throws; one after it is kept as `failure`.
+  let stopped = false;
+  let failure = null;
   const playing = video.play();
-  playing.catch(() => {});
+  playing.catch((error) => {
+    // Clearing `srcObject` in stop() aborts a play() still waiting; that one isn't a failure.
+    if (!stopped) failure = error;
+  });
   await Promise.race([playing, new Promise((resolve) => setTimeout(resolve, FIRST_FRAME_WAIT))]);
   const frames = [];
   let last = null;
@@ -96,7 +102,12 @@ export async function sampleFrames(stream, now, { interval = 500, maxEdge = 1600
     resume: () => {
       paused = Math.max(0, paused - 1);
     },
+    /** Why the video never played, when `play()` was refused after start() went on. */
+    get failure() {
+      return failure;
+    },
     async stop() {
+      stopped = true;
       clearInterval(timer);
       paused = 0;
       await sample(true);

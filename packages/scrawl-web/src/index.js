@@ -153,6 +153,8 @@ async function finish(session, options) {
   const frames = await session.frames.stop();
   session.display.getTracks().forEach((track) => track.stop());
   const audioBlob = session.audio ? await session.audio.stop() : null;
+  // Refused after start() went on: say so, rather than "needs at least one frame".
+  if (!frames.length && session.frames.failure) throw session.frames.failure;
 
   let transcript;
   if (session.speech) {

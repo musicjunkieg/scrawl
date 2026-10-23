@@ -248,7 +248,8 @@ try {
     const canvas = Object.assign(document.createElement("canvas"), { width: 64, height: 40 });
     const stream = canvas.captureStream();
     const t0 = performance.now();
-    const frames = await sampleFrames(stream, () => Math.round(performance.now() - t0), { interval: 100 });
+    // A long interval, so only the first frame's own sample and stop()'s can add frames.
+    const frames = await sampleFrames(stream, () => Math.round(performance.now() - t0), { interval: 60_000 });
     const waited = Math.round(performance.now() - t0);
     const context = canvas.getContext("2d");
     context.fillStyle = "red";
@@ -256,9 +257,29 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 600));
     const sampled = await frames.stop();
     stream.getTracks().forEach((track) => track.stop());
-    return { started: waited < 5_000, sampled: sampled.length > 0 };
+    return { started: waited < 5_000, sampled: sampled.length };
   });
-  assert.deepEqual(late, { started: true, sampled: true });
+  assert.deepEqual(late, { started: true, sampled: 2 }, "the first frame is sampled when it arrives, and again at stop()");
+  // A play() refused after that wait is kept, for stop() to report instead of "no frames".
+  at("checking a play() refused late");
+  const refusedLate = await page.evaluate(async () => {
+    const { sampleFrames, FIRST_FRAME_WAIT } = await import("/src/frames.js");
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = () =>
+      new Promise((_, reject) => setTimeout(() => reject(new DOMException("no", "NotAllowedError")), FIRST_FRAME_WAIT + 200));
+    try {
+      const canvas = Object.assign(document.createElement("canvas"), { width: 64, height: 40 });
+      const stream = canvas.captureStream();
+      const frames = await sampleFrames(stream, () => 0, { interval: 60_000 });
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const sampled = await frames.stop();
+      stream.getTracks().forEach((track) => track.stop());
+      return { failure: frames.failure?.name, sampled: sampled.length };
+    } finally {
+      HTMLMediaElement.prototype.play = play;
+    }
+  });
+  assert.deepEqual(refusedLate, { failure: "NotAllowedError", sampled: 0 });
 
   clearTimeout(watchdog);
   console.log(`ok: ${bundle.files.length} files, ${m.keyframes.length} keyframes, ${m.marks.length} marks, built in ${ms} ms → ${out}`);
