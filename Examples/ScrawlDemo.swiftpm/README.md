@@ -22,8 +22,6 @@ phone (`Scrawl.shared.compiles = .onDevice`), with no Mac running Scrawl.
    first time, the iPhone asks you to trust the developer: **Settings → General → VPN & Device
    Management**.
 
-The repository's folder must be named `scrawl`: the demo refers to the package by that name.
-
 ## What to try (about 15 minutes)
 
 1. **A short recording.** Three-finger long press, say "this button should say Save", tap the

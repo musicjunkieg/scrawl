@@ -26,7 +26,8 @@ let package = Package(
       ]
     ),
   ],
-  dependencies: [.package(path: "../..")],
+  // Named, so the demo resolves whatever the checkout's folder is called.
+  dependencies: [.package(name: "scrawl", path: "../..")],
   targets: [
     .executableTarget(
       name: "ScrawlDemo",

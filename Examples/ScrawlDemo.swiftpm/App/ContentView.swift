@@ -37,6 +37,8 @@ struct ContentView: View {
       .refreshable { load() }
       .onAppear { load() }
       .onChange(of: phase) { load() }
+      // "Saved on this iPhone": a new bundle is in the folder.
+      .onChange(of: Scrawl.shared.uploadStatus) { load() }
     }
   }
 
