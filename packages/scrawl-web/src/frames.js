@@ -6,6 +6,8 @@
 /** How different two 16×16 luma thumbnails must be (mean absolute difference, 0–255). */
 export const CHANGE_THRESHOLD = 1.5;
 const THUMB = 16;
+/** How long start() waits for the tab's first frame (ms); sampling begins whenever it comes. */
+export const FIRST_FRAME_WAIT = 1_000;
 
 /** The capture size for a `width`×`height` video with its long edge at most `maxEdge`. */
 export function sampleSize(width, height, maxEdge) {
@@ -47,7 +49,17 @@ export async function sampleFrames(stream, now, { interval = 500, maxEdge = 1600
   video.muted = true;
   video.playsInline = true;
   video.srcObject = stream;
-  await video.play();
+  // `play()` resolves at the first frame, which a static tab can be slow to send (and a headless
+  // browser may never send): wait a moment for it, never forever. A refusal in that moment
+  // throws; one after it is kept as `failure`.
+  let stopped = false;
+  let failure = null;
+  const playing = video.play();
+  playing.catch((error) => {
+    // Clearing `srcObject` in stop() aborts a play() still waiting; that one isn't a failure.
+    if (!stopped) failure = error;
+  });
+  await Promise.race([playing, new Promise((resolve) => setTimeout(resolve, FIRST_FRAME_WAIT))]);
   const frames = [];
   let last = null;
   let paused = 0;
@@ -56,7 +68,9 @@ export async function sampleFrames(stream, now, { interval = 500, maxEdge = 1600
   const context = canvas.getContext("2d", { willReadFrequently: true });
 
   const sample = (force = false) => {
-    if (paused > 0 || !video.videoWidth || frames.length >= maxFrames) return pending;
+    // A size can come before the picture: without current data the canvas would be blank.
+    const ready = video.readyState >= video.HAVE_CURRENT_DATA && video.videoWidth;
+    if (paused > 0 || !ready || frames.length >= maxFrames) return pending;
     const t = now();
     const { width, height } = sampleSize(video.videoWidth, video.videoHeight, maxEdge);
     canvas.width = width;
@@ -73,6 +87,10 @@ export async function sampleFrames(stream, now, { interval = 500, maxEdge = 1600
     return pending;
   };
   sample(true);
+  // Without a frame yet, the first one is sampled when it arrives.
+  if (video.readyState < video.HAVE_CURRENT_DATA) {
+    video.addEventListener("loadeddata", () => sample(true), { once: true });
+  }
   const timer = setInterval(() => sample(false), interval);
   return {
     /** Samples now, even when nothing changed (a click, the start of ink). */
@@ -84,7 +102,13 @@ export async function sampleFrames(stream, now, { interval = 500, maxEdge = 1600
     resume: () => {
       paused = Math.max(0, paused - 1);
     },
+    /** Why the video never played, when `play()` was refused after start() went on. */
+    get failure() {
+      return failure;
+    },
+    /** Ends sampling and hands back the frames, after one last sample. */
     async stop() {
+      stopped = true;
       clearInterval(timer);
       paused = 0;
       await sample(true);

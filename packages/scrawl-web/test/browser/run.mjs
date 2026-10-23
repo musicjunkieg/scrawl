@@ -49,10 +49,24 @@ const browser = await chromium.launch({
 });
 try {
   const page = await browser.newPage({ viewport: { width: 900, height: 560 } });
-  page.on("console", (m) => m.type() === "error" && console.error("page:", m.text()));
+  page.on("console", (m) => {
+    if (m.type() === "error") console.error("page:", m.text());
+    else if (m.type() === "info" && m.text().startsWith("step:")) console.log(`  ${m.text()}`);
+  });
   await page.goto(`${base}/test/browser/index.html`);
   at("starting a recording");
   await page.evaluate(async () => {
+    // Where start() waits, in the job log, if it ever hangs again.
+    const media = navigator.mediaDevices;
+    for (const name of ["getDisplayMedia", "getUserMedia"]) {
+      const ask = media[name].bind(media);
+      media[name] = async (...args) => {
+        console.info(`step: ${name}`);
+        const stream = await ask(...args);
+        console.info(`step: ${name} answered`);
+        return stream;
+      };
+    }
     const { createScrawl } = await import("/src/index.js");
     window.originals = { fetch: window.fetch, error: console.error };
     window.scrawl = createScrawl({
@@ -65,6 +79,7 @@ try {
       }),
     });
     await window.scrawl.start();
+    console.info("step: started");
   });
   await page.waitForTimeout(700);
   await page.click("#move");
@@ -224,6 +239,83 @@ try {
     return ["typed", "noted", "tb"].map((id) => describe(document.getElementById(id)));
   });
   assert.deepEqual(named, ["<div>", "<div> “Notes”", "<div>"]);
+
+  // A stream with no frame yet (a static tab can be slow to send one, and a headless browser may
+  // never) doesn't hold up start(): sampling begins with the first frame that does arrive.
+  at("checking a stream that has no frame yet");
+  const late = await page.evaluate(async () => {
+    const { sampleFrames } = await import("/src/frames.js");
+    const canvas = Object.assign(document.createElement("canvas"), { width: 64, height: 40 });
+    const stream = canvas.captureStream();
+    const t0 = performance.now();
+    // A long interval, so only the first frame's own sample and stop()'s can add frames.
+    const frames = await sampleFrames(stream, () => Math.round(performance.now() - t0), { interval: 60_000 });
+    const waited = Math.round(performance.now() - t0);
+    const context = canvas.getContext("2d");
+    context.fillStyle = "red";
+    context.fillRect(0, 0, 64, 40);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const sampled = await frames.stop();
+    stream.getTracks().forEach((track) => track.stop());
+    return { started: waited < 5_000, sampled: sampled.length };
+  });
+  assert.deepEqual(late, { started: true, sampled: 2 }, "the first frame is sampled when it arrives, and again at stop()");
+  // A play() refused after that wait is kept, for stop() to report instead of "no frames".
+  at("checking a play() refused late");
+  const refusedLate = await page.evaluate(async () => {
+    const { sampleFrames, FIRST_FRAME_WAIT } = await import("/src/frames.js");
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = () =>
+      new Promise((_, reject) => setTimeout(() => reject(new DOMException("no", "NotAllowedError")), FIRST_FRAME_WAIT + 200));
+    try {
+      const canvas = Object.assign(document.createElement("canvas"), { width: 64, height: 40 });
+      const stream = canvas.captureStream();
+      const frames = await sampleFrames(stream, () => 0, { interval: 60_000 });
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const sampled = await frames.stop();
+      stream.getTracks().forEach((track) => track.stop());
+      return { failure: frames.failure?.name, sampled: sampled.length };
+    } finally {
+      HTMLMediaElement.prototype.play = play;
+    }
+  });
+  assert.deepEqual(refusedLate, { failure: "NotAllowedError", sampled: 0 });
+  // Through stop(): it fails with that reason, and leaves no tab capture or Web Speech running.
+  at("checking a recording whose play() is refused late");
+  const failedLate = await page.evaluate(async () => {
+    const { createScrawl } = await import("/src/index.js");
+    const { FIRST_FRAME_WAIT } = await import("/src/frames.js");
+    let listening = 0;
+    window.SpeechRecognition = class {
+      start() {
+        listening++;
+      }
+      stop() {
+        listening--;
+        setTimeout(() => this.onend?.());
+      }
+    };
+    // A tab that never sends a frame, so the refusal is all there is.
+    const display = Object.assign(document.createElement("canvas"), { width: 64, height: 40 }).captureStream();
+    const media = navigator.mediaDevices;
+    const getDisplayMedia = media.getDisplayMedia;
+    media.getDisplayMedia = async () => display;
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = () =>
+      new Promise((_, reject) => setTimeout(() => reject(new DOMException("no", "NotAllowedError")), FIRST_FRAME_WAIT + 200));
+    try {
+      const scrawl = createScrawl({ transcribe: "web-speech" });
+      await scrawl.start();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const error = await scrawl.stop().then(() => null, (e) => e.name);
+      return { error, listening, live: display.getTracks().some((t) => t.readyState === "live") };
+    } finally {
+      HTMLMediaElement.prototype.play = play;
+      media.getDisplayMedia = getDisplayMedia;
+      delete window.SpeechRecognition;
+    }
+  });
+  assert.deepEqual(failedLate, { error: "NotAllowedError", listening: 0, live: false });
 
   clearTimeout(watchdog);
   console.log(`ok: ${bundle.files.length} files, ${m.keyframes.length} keyframes, ${m.marks.length} marks, built in ${ms} ms → ${out}`);
