@@ -58,9 +58,15 @@ enum OnDeviceBuild {
 
     let manager = FileManager.default
     try? manager.removeItem(at: bundle)
-    try built.write(to: bundle)
-    try manager.copyItem(at: movie, to: bundle.appending(path: videoName))
-    try timeline.write(to: bundle.appending(path: "timeline.json"))
+    do {
+      try built.write(to: bundle)
+      try manager.copyItem(at: movie, to: bundle.appending(path: videoName))
+      try timeline.write(to: bundle.appending(path: "timeline.json"))
+    } catch {
+      // Not a half-written bundle: the recording beside it is untouched.
+      try? manager.removeItem(at: bundle)
+      throw error
+    }
     return bundle
   }
 

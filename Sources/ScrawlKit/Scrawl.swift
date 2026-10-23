@@ -378,7 +378,13 @@
     /// Where recordings become bundles: on the Mac (the default) or on this phone. Takes effect on
     /// the next recording.
     public var compiles: Compiling = .onMac {
-      didSet { if compiles != oldValue { notifyConfigurationChanged() } }
+      didSet {
+        guard compiles != oldValue else { return }
+        notifyConfigurationChanged()
+        #if SCRAWL_CORE
+          if compiles == .onDevice { resumeInterruptedBuilds() }
+        #endif
+      }
     }
     /// Gets each bundle built on the phone (`compiles = .onDevice`): its `<id>.scrawl` folder in
     /// `directory`, with the movie and timeline inside. Without it, the share sheet offers the
@@ -386,6 +392,8 @@
     public var onBundle: (@MainActor (URL) -> Void)?
     /// The phone is building a recording's bundle (the strip says "Building…").
     private(set) var isBuildingOnPhone = false
+    /// Interrupted on-device builds were looked for this launch (`resumeInterruptedBuilds`).
+    @ObservationIgnored private var resumedBuilds = false
     /// Candidate Scrawl ingest URLs on the Mac (from Keychain or launch args / env).
     public var serverURLs: [URL] = [] {
       didSet { notifyConfigurationChanged() }
@@ -1286,15 +1294,22 @@
       /// On the phone: transcribe, build the bundle into `directory`, move the movie and timeline
       /// into it, and hand it to `onBundle` (or the share sheet). A failed build keeps the
       /// recording, with Share.
-      private func deliverOnDevice(_ finished: FinishedRecording) async {
+      /// `recovered`: a build iOS ended last time (`resumeInterruptedBuilds`), which goes to
+      /// `onBundle` only, with no strip or share sheet.
+      private func deliverOnDevice(_ finished: FinishedRecording, recovered: Bool = false) async {
         let recording = finished.recording
+        // Until this build is handled, so one iOS ends (the app killed in the background) is
+        // finished at the next launch.
+        let marker = Self.buildMarker(for: recording.movie)
+        try? Data().write(to: marker)
+        defer { try? FileManager.default.removeItem(at: marker) }
         let timeline = finished.timelineData
         let info = (try? JSONSerialization.jsonObject(with: timeline)) as? [String: Any]
         let narrated = info?["audio"] as? Bool ?? false
         let id = recording.movie.deletingPathExtension().lastPathComponent
         let createdAt = (try? Date(finished.recordedAt, strategy: .iso8601)) ?? Date()
         let directory = Self.directory
-        isBuildingOnPhone = true
+        if !recovered { isBuildingOnPhone = true }
         // Leaving the app ends an app-frames recording and starts this; ask for time to finish.
         // A build longer than iOS allows fails and keeps the recording, with Share.
         let background = BackgroundTime(named: "Scrawl bundle")
@@ -1310,7 +1325,7 @@
           }
         }.value
         background.end()
-        isBuildingOnPhone = false
+        if !recovered { isBuildingOnPhone = false }
         switch built {
         case let .success(bundle):
           // The bundle holds its own copies now.
@@ -1323,14 +1338,55 @@
           ))
           if let onBundle {
             onBundle(bundle)
-          } else if sharesWhenDone {
+          } else if sharesWhenDone, !recovered {
             Self.share([bundle])
           }
-          await presentSent(.onPhone)
+          if !recovered { await presentSent(.onPhone) }
         case let .failure(error):
           print("Scrawl: building the bundle on the phone failed: \(error)")
           recordings.append(recording)
-          await presentFailure(.notBuilt, recording: recording)
+          if !recovered { await presentFailure(.notBuilt, recording: recording) }
+        }
+      }
+
+      private nonisolated static func buildMarker(for movie: URL) -> URL {
+        movie.deletingPathExtension().appendingPathExtension("building")
+      }
+
+      /// Builds again, once a launch, the recordings whose build iOS ended (a `.building` marker
+      /// left beside the movie): the app was killed in the background before it finished.
+      private func resumeInterruptedBuilds() {
+        guard !resumedBuilds else { return }
+        resumedBuilds = true
+        let manager = FileManager.default
+        var interrupted: [FinishedRecording] = []
+        for directory in [Self.directory, Self.stagingDirectory] {
+          let files = (try? manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+          for marker in files where marker.pathExtension == "building" {
+            let stem = marker.deletingPathExtension()
+            let timeline = stem.appendingPathExtension("json")
+            guard let movie = ["mp4", "mov"].map({ stem.appendingPathExtension($0) })
+              .first(where: { manager.fileExists(atPath: $0.path) }),
+              let data = try? Data(contentsOf: timeline)
+            else {
+              try? manager.removeItem(at: marker)
+              continue
+            }
+            let info = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            interrupted.append(FinishedRecording(
+              recording: Recording(movie: movie, timeline: timeline),
+              timelineData: data,
+              readyMarker: stem.appendingPathExtension("ready"),
+              sentMarker: stem.appendingPathExtension("sent"),
+              recordedAt: info?["recordedAt"] as? String ?? ""
+            ))
+          }
+        }
+        guard !interrupted.isEmpty else { return }
+        Task {
+          for finished in interrupted {
+            await self.deliverOnDevice(finished, recovered: true)
+          }
         }
       }
     #endif
