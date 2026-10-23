@@ -6,6 +6,8 @@
 /** How different two 16×16 luma thumbnails must be (mean absolute difference, 0–255). */
 export const CHANGE_THRESHOLD = 1.5;
 const THUMB = 16;
+/** How long start() waits for the tab's first frame (ms); sampling begins whenever it comes. */
+export const FIRST_FRAME_WAIT = 1_000;
 
 /** The capture size for a `width`×`height` video with its long edge at most `maxEdge`. */
 export function sampleSize(width, height, maxEdge) {
@@ -47,7 +49,11 @@ export async function sampleFrames(stream, now, { interval = 500, maxEdge = 1600
   video.muted = true;
   video.playsInline = true;
   video.srcObject = stream;
-  await video.play();
+  // `play()` resolves at the first frame, which a static tab can be slow to send (and a headless
+  // browser may never send): wait a moment for it, never forever. A refusal still throws.
+  const playing = video.play();
+  playing.catch(() => {});
+  await Promise.race([playing, new Promise((resolve) => setTimeout(resolve, FIRST_FRAME_WAIT))]);
   const frames = [];
   let last = null;
   let paused = 0;
@@ -73,6 +79,8 @@ export async function sampleFrames(stream, now, { interval = 500, maxEdge = 1600
     return pending;
   };
   sample(true);
+  // Without a frame yet, the first one is sampled when it arrives.
+  if (!video.videoWidth) video.addEventListener("loadeddata", () => sample(true), { once: true });
   const timer = setInterval(() => sample(false), interval);
   return {
     /** Samples now, even when nothing changed (a click, the start of ink). */

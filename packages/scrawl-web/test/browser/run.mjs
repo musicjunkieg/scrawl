@@ -49,10 +49,24 @@ const browser = await chromium.launch({
 });
 try {
   const page = await browser.newPage({ viewport: { width: 900, height: 560 } });
-  page.on("console", (m) => m.type() === "error" && console.error("page:", m.text()));
+  page.on("console", (m) => {
+    if (m.type() === "error") console.error("page:", m.text());
+    else if (m.type() === "info" && m.text().startsWith("step:")) console.log(`  ${m.text()}`);
+  });
   await page.goto(`${base}/test/browser/index.html`);
   at("starting a recording");
   await page.evaluate(async () => {
+    // Where start() waits, in the job log, if it ever hangs again.
+    const media = navigator.mediaDevices;
+    for (const name of ["getDisplayMedia", "getUserMedia"]) {
+      const ask = media[name].bind(media);
+      media[name] = async (...args) => {
+        console.info(`step: ${name}`);
+        const stream = await ask(...args);
+        console.info(`step: ${name} answered`);
+        return stream;
+      };
+    }
     const { createScrawl } = await import("/src/index.js");
     window.originals = { fetch: window.fetch, error: console.error };
     window.scrawl = createScrawl({
@@ -65,6 +79,7 @@ try {
       }),
     });
     await window.scrawl.start();
+    console.info("step: started");
   });
   await page.waitForTimeout(700);
   await page.click("#move");
@@ -224,6 +239,26 @@ try {
     return ["typed", "noted", "tb"].map((id) => describe(document.getElementById(id)));
   });
   assert.deepEqual(named, ["<div>", "<div> “Notes”", "<div>"]);
+
+  // A stream with no frame yet (a static tab can be slow to send one, and a headless browser may
+  // never) doesn't hold up start(): sampling begins with the first frame that does arrive.
+  at("checking a stream that has no frame yet");
+  const late = await page.evaluate(async () => {
+    const { sampleFrames } = await import("/src/frames.js");
+    const canvas = Object.assign(document.createElement("canvas"), { width: 64, height: 40 });
+    const stream = canvas.captureStream();
+    const t0 = performance.now();
+    const frames = await sampleFrames(stream, () => Math.round(performance.now() - t0), { interval: 100 });
+    const waited = Math.round(performance.now() - t0);
+    const context = canvas.getContext("2d");
+    context.fillStyle = "red";
+    context.fillRect(0, 0, 64, 40);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const sampled = await frames.stop();
+    stream.getTracks().forEach((track) => track.stop());
+    return { started: waited < 5_000, sampled: sampled.length > 0 };
+  });
+  assert.deepEqual(late, { started: true, sampled: true });
 
   clearTimeout(watchdog);
   console.log(`ok: ${bundle.files.length} files, ${m.keyframes.length} keyframes, ${m.marks.length} marks, built in ${ms} ms → ${out}`);
