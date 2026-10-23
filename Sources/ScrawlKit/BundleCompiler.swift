@@ -105,6 +105,10 @@ public final class BundleCompiler {
     guard let w = UInt32(exactly: width), let h = UInt32(exactly: height) else {
       throw Failure(description: "The movie is \(width)×\(height), not a valid size")
     }
+    // `data(withJSONObject:)` raises an exception Swift can't catch for a value JSON can't hold.
+    guard JSONSerialization.isValidJSONObject(fields) else {
+      throw Failure(description: "The fields hold a value JSON can't (a Date or URL, say)")
+    }
     let fieldsJSON = try String(decoding: JSONSerialization.data(withJSONObject: fields), as: UTF8.self)
     var error: UnsafeMutablePointer<CChar>?
     let json = String(decoding: timeline, as: UTF8.self).withCString { timeline in

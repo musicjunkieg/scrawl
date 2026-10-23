@@ -71,6 +71,9 @@ struct BundleCompilerTests {
     #expect(throws: BundleCompiler.Failure.self) {
       try BundleCompiler.capture(timeline: Data("[".utf8), width: 40, height: 80, durationMs: 1000)
     }
+    #expect(throws: BundleCompiler.Failure.self) {
+      try BundleCompiler.capture(timeline: timeline, width: 40, height: 80, durationMs: 1000, fields: ["createdAtMs": Date()])
+    }
   }
 
   @Test func badInputThrowsInsteadOfCrashing() {
