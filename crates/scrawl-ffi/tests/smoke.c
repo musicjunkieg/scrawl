@@ -68,6 +68,24 @@ int main(void) {
   scrawl_string_free(error);
   assert(!scrawl_compiler_add_frame(c, 0, 1, 1, NULL, 4));
   scrawl_compiler_free(c);
+
+  // A ScrawlKit timeline becomes a capture that compiles.
+  error = NULL;
+  const char *timeline =
+      "{\"app\":\"UpDown\",\"screen\":{\"width\":400,\"height\":800,\"scale\":3},"
+      "\"markers\":[0.5],\"strokes\":[{\"t0\":0.2,\"t1\":0.4,"
+      "\"points\":[[100,200,0.2],[300,600,0.4]]}]}";
+  char *kit = scrawl_capture_from_timeline(timeline, 40, 80, 1000, "{\"id\":\"kit-test\"}", &error);
+  assert(kit && !error && strstr(kit, "\"source\":\"iphone\""));
+  c = scrawl_compiler_new();
+  add(c, 0, 40, 80, 0);
+  b = scrawl_compiler_compile(c, kit, &error);
+  assert(b && !error && strstr(scrawl_bundle_summary(b), "kit-test.scrawl"));
+  scrawl_bundle_free(b);
+  scrawl_compiler_free(c);
+  scrawl_string_free(kit);
+  assert(!scrawl_capture_from_timeline("[", 40, 80, 1000, NULL, &error) && error);
+  scrawl_string_free(error);
   scrawl_compiler_free(NULL);
   scrawl_bundle_free(NULL);
   return 0;

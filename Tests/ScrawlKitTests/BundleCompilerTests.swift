@@ -53,6 +53,36 @@ struct BundleCompilerTests {
     }
   }
 
+  @Test func aTimelineBecomesACaptureThatCompiles() throws {
+    let timeline = Data("""
+    {"app":"UpDown","screen":{"width":400,"height":800,"scale":3},"markers":[0.5],
+     "touches":[{"t":0.2,"id":1,"x":200,"y":400,"phase":"down"},
+                {"t":0.25,"id":1,"x":200,"y":400,"phase":"up"}]}
+    """.utf8)
+    let capture = try BundleCompiler.capture(
+      timeline: timeline, width: 40, height: 80, durationMs: 1000,
+      fields: ["id": "kit-swift", "transcript": ["source": "apple", "text": "right here", "segments": []]]
+    )
+    let compiler = BundleCompiler()
+    try compiler.addFrame(at: 0, width: 40, height: 80, rgba: pixels(40, 80, 90))
+    let bundle = try compiler.compile(capture: capture)
+    #expect(bundle.summary.contains("kit-swift.scrawl"))
+    #expect(bundle.summary.contains("right here"))
+    #expect(throws: BundleCompiler.Failure.self) {
+      try BundleCompiler.capture(timeline: Data("[".utf8), width: 40, height: 80, durationMs: 1000)
+    }
+    #expect(throws: BundleCompiler.Failure.self) {
+      try BundleCompiler.capture(timeline: timeline, width: 40, height: 80, durationMs: 1000, fields: ["createdAtMs": Date()])
+    }
+    // {"app":"<0xFF>"}: not UTF-8, so not quietly read as "\u{FFFD}".
+    #expect(throws: BundleCompiler.Failure.self) {
+      try BundleCompiler.capture(
+        timeline: Data([0x7B, 0x22, 0x61, 0x70, 0x70, 0x22, 0x3A, 0x22, 0xFF, 0x22, 0x7D]),
+        width: 40, height: 80, durationMs: 1000
+      )
+    }
+  }
+
   @Test func badInputThrowsInsteadOfCrashing() {
     #expect(throws: BundleCompiler.Failure.self) {
       try BundleCompiler().addFrame(at: 0, width: -1, height: 40, rgba: pixels(64, 40, 0))

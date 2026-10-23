@@ -95,6 +95,34 @@ public final class BundleCompiler {
     return Bundle(files: files, summary: summary)
   }
 
+  /// The capture JSON for a ScrawlKit recording, built from its timeline the way the Mac app
+  /// imports one (touches become taps and swipes, ink moves to the bundle's coordinates).
+  /// `width`×`height` is the movie's size in pixels; `fields` replace the timeline's capture
+  /// fields (`id`, `createdAtMs`, `transcript`, `video`, `audio`, …).
+  public static func capture(
+    timeline: Data, width: Int, height: Int, durationMs: UInt64, fields: [String: Any] = [:]
+  ) throws -> String {
+    guard let w = UInt32(exactly: width), let h = UInt32(exactly: height) else {
+      throw Failure(description: "The movie is \(width)×\(height), not a valid size")
+    }
+    // `data(withJSONObject:)` raises an exception Swift can't catch for a value JSON can't hold.
+    guard JSONSerialization.isValidJSONObject(fields) else {
+      throw Failure(description: "The fields hold a value JSON can't (a Date or URL, say)")
+    }
+    let fieldsJSON = try String(decoding: JSONSerialization.data(withJSONObject: fields), as: UTF8.self)
+    var error: UnsafeMutablePointer<CChar>?
+    // Not `String(decoding:)`, which would quietly turn bad bytes into U+FFFD.
+    guard let timelineJSON = String(data: timeline, encoding: .utf8) else {
+      throw Failure(description: "The timeline isn't UTF-8")
+    }
+    let json = timelineJSON.withCString { timeline in
+      fieldsJSON.withCString { scrawl_capture_from_timeline(timeline, w, h, durationMs, $0, &error) }
+    }
+    guard let json else { throw failure(error) }
+    defer { scrawl_string_free(json) }
+    return String(cString: json)
+  }
+
   private static func failure(_ error: UnsafeMutablePointer<CChar>?) -> Failure {
     defer { scrawl_string_free(error) }
     return Failure(description: error.map { String(cString: $0) } ?? "The compiler failed")

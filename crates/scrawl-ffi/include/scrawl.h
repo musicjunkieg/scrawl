@@ -51,6 +51,14 @@ const uint8_t *scrawl_bundle_file_data(const ScrawlBundle *bundle, size_t index,
 // summary.md's text.
 const char *scrawl_bundle_summary(const ScrawlBundle *bundle);
 
+// A ScrawlKit recording's capture JSON, from its timeline JSON, the movie's size in pixels and
+// length: touches become taps and swipes, ink moves to the bundle's coordinates. fields_json is
+// NULL or a JSON object of capture fields that replace the timeline's (id, createdAtMs,
+// transcript, video, audio, ...). Free with scrawl_string_free.
+char *scrawl_capture_from_timeline(const char *timeline_json, uint32_t width, uint32_t height,
+                                   uint64_t duration_ms, const char *fields_json, char **error);
+
+// Frees an error message or a string from scrawl_capture_from_timeline.
 void scrawl_string_free(char *message);
 
 #ifdef __cplusplus

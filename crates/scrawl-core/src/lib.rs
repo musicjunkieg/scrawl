@@ -15,4 +15,5 @@ pub mod keyframes;
 pub mod page;
 mod par;
 pub mod render;
+pub mod scrawlkit;
 pub mod sketch;
