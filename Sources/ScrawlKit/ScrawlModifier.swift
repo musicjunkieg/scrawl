@@ -87,7 +87,7 @@
     }
 
     private func syncInstall() {
-      guard isEnabled, Scrawl.isConfigured, let window else {
+      guard isEnabled, Scrawl.isActive, let window else {
         uninstall()
         return
       }
@@ -130,7 +130,7 @@
     }
 
     @objc private func triggered(_ press: UILongPressGestureRecognizer) {
-      guard press.state == .began, Scrawl.isConfigured else { return }
+      guard press.state == .began, Scrawl.isActive else { return }
       UINotificationFeedbackGenerator().notificationOccurred(.success)
       Scrawl.shared.toggle()
     }

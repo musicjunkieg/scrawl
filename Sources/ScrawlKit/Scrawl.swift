@@ -353,7 +353,8 @@
     /// Whether to turn off iOS's three-finger text-editing gestures (undo, redo, cut, copy, paste,
     /// and their Undo · Cut · Copy · Redo bar) in this app while ScrawlKit's three-finger trigger
     /// is installed, so starting a recording with a text field focused doesn't open that bar.
-    /// Only on paired (configured) devices; set `false` to keep the system gestures.
+    /// Only while ScrawlKit is active (paired, or `compiles = .onDevice`); set `false` to keep the
+    /// system gestures.
     public var suppressesSystemEditingGestures = true {
       didSet { syncSystemIntegration() }
     }
@@ -363,6 +364,28 @@
     }
     /// Whether to show the share sheet when a recording stops (used as fallback if Mac ingest is unreachable).
     public var sharesWhenDone = true
+
+    /// Where a recording becomes a `.scrawl` bundle.
+    public enum Compiling: Sendable {
+      /// Sent to Scrawl on the Mac (or its HTTPS endpoint), which builds it. The default.
+      case onMac
+      /// Built here on the phone with `ScrawlCore` (`SCRAWL_CORE=1`), the narration transcribed
+      /// with Apple's on-device speech, then handed to `onBundle`. Transcribing needs
+      /// `NSSpeechRecognitionUsageDescription` in the app's Info.plist; iOS asks the person once.
+      case onDevice
+    }
+
+    /// Where recordings become bundles: on the Mac (the default) or on this phone. Takes effect on
+    /// the next recording.
+    public var compiles: Compiling = .onMac {
+      didSet { if compiles != oldValue { notifyConfigurationChanged() } }
+    }
+    /// Gets each bundle built on the phone (`compiles = .onDevice`): its `<id>.scrawl` folder in
+    /// `directory`, with the movie and timeline inside. Without it, the share sheet offers the
+    /// folder when `sharesWhenDone`.
+    public var onBundle: (@MainActor (URL) -> Void)?
+    /// The phone is building a recording's bundle (the strip says "Building…").
+    private(set) var isBuildingOnPhone = false
     /// Candidate Scrawl ingest URLs on the Mac (from Keychain or launch args / env).
     public var serverURLs: [URL] = [] {
       didSet { notifyConfigurationChanged() }
@@ -381,6 +404,20 @@
 
     public var isConfigured: Bool {
       !serverURLs.isEmpty && !(token?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+    }
+
+    /// Whether ScrawlKit is in use here: paired with a Mac, or building bundles on the phone
+    /// (`compiles = .onDevice`, which needs no Mac). Otherwise it stays inert.
+    var isActive: Bool {
+      #if SCRAWL_CORE
+        isConfigured || compiles == .onDevice
+      #else
+        isConfigured
+      #endif
+    }
+
+    static var isActive: Bool {
+      shared.isActive
     }
 
     private init() {
@@ -425,7 +462,7 @@
       serverURLs = config?.urls ?? []
       token = config?.token
       sessionID = config?.sessionID
-      if !isConfigured {
+      if !isActive {
         if isRecording || isStarting {
           isRecording = false
           isStarting = false
@@ -451,10 +488,11 @@
     }
 
     /// The pieces that reach outside the app's own views (the editing-gesture override and the
-    /// keyboard tracker) run only on paired devices; unpaired, nothing is installed or observed.
+    /// keyboard tracker) run only while ScrawlKit is active (`isActive`); otherwise nothing is
+    /// installed or observed.
     func syncSystemIntegration() {
-      SystemEditingGestures.setSuppressed(isConfigured && suppressesSystemEditingGestures && threeFingerTriggers > 0)
-      KeyboardTracker.shared.setTracking(isConfigured)
+      SystemEditingGestures.setSuppressed(isActive && suppressesSystemEditingGestures && threeFingerTriggers > 0)
+      KeyboardTracker.shared.setTracking(isActive)
       syncOutbox()
     }
 
@@ -666,7 +704,7 @@
 
     /// Starts recording, or sends the current recording.
     public func toggle() {
-      guard isConfigured else { return }
+      guard isActive else { return }
       isRecording ? stop() : start()
     }
 
@@ -677,7 +715,7 @@
     }
 
     public func start() {
-      guard isConfigured, !isRecording, !isStarting else { return }
+      guard isActive, !isRecording, !isStarting else { return }
       let hosted = hostedURL != nil
       let recorder = captureMethod.makeRecorder(hosted: hosted)
       guard recorder.isAvailable else { return }
@@ -883,6 +921,14 @@
     }
 
     private func deliver(_ finished: FinishedRecording) async {
+      if compiles == .onDevice {
+        #if SCRAWL_CORE
+          await deliverOnDevice(finished)
+          return
+        #else
+          print("Scrawl: compiles = .onDevice needs ScrawlCore (build with SCRAWL_CORE=1); sending to the Mac")
+        #endif
+      }
       if hostedURL != nil {
         await deliverHosted(finished)
         return
@@ -1235,6 +1281,55 @@
         await presentFailure(.unreachable, recording: recording)
       }
     }
+
+    #if SCRAWL_CORE
+      /// On the phone: transcribe, build the bundle into `directory`, move the movie and timeline
+      /// into it, and hand it to `onBundle` (or the share sheet). A failed build keeps the
+      /// recording, with Share.
+      private func deliverOnDevice(_ finished: FinishedRecording) async {
+        let recording = finished.recording
+        let timeline = finished.timelineData
+        let info = (try? JSONSerialization.jsonObject(with: timeline)) as? [String: Any]
+        let narrated = info?["audio"] as? Bool ?? false
+        let id = recording.movie.deletingPathExtension().lastPathComponent
+        let createdAt = (try? Date(finished.recordedAt, strategy: .iso8601)) ?? Date()
+        let directory = Self.directory
+        isBuildingOnPhone = true
+        let built = await Task.detached(priority: .userInitiated) { () -> Result<URL, any Error> in
+          let transcript = await OnDeviceSpeech.transcript(of: recording.movie, narrated: narrated)
+          do {
+            return try await .success(OnDeviceBuild.build(
+              movie: recording.movie, timeline: timeline, id: id, createdAt: createdAt,
+              transcript: transcript, into: directory
+            ))
+          } catch {
+            return .failure(error)
+          }
+        }.value
+        isBuildingOnPhone = false
+        switch built {
+        case let .success(bundle):
+          // The bundle holds its own copies now.
+          for file in [recording.movie, recording.timeline] {
+            try? FileManager.default.removeItem(at: file)
+          }
+          recordings.append(Recording(
+            movie: bundle.appending(path: "recording.\(recording.movie.pathExtension.lowercased())"),
+            timeline: bundle.appending(path: "timeline.json")
+          ))
+          if let onBundle {
+            onBundle(bundle)
+          } else if sharesWhenDone {
+            Self.share([bundle])
+          }
+          await presentSent(.onPhone)
+        case let .failure(error):
+          print("Scrawl: building the bundle on the phone failed: \(error)")
+          recordings.append(recording)
+          await presentFailure(.notBuilt, recording: recording)
+        }
+      }
+    #endif
 
     /// HTTPS endpoint: the recording becomes an outbox entry (on disk before anything is sent) and
     /// the strip follows its upload: "Sending…" while it runs on a working network, however long
