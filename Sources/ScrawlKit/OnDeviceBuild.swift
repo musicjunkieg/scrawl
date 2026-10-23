@@ -46,11 +46,12 @@ enum OnDeviceBuild {
     let compiler = BundleCompiler()
     let every = max(durationMs / maxCandidates, 250)
     let candidates = Array(stride(from: UInt64(0), to: durationMs, by: Int(every)))
-    for frame in try await frames(of: asset, at: candidates, edge: candidateEdge) {
+    // Each frame goes straight to the compiler (which copies it), so Swift never holds a pass.
+    try await forEachFrame(of: asset, at: candidates, edge: candidateEdge) { frame in
       try compiler.addFrame(at: frame.t, width: frame.width, height: frame.height, rgba: frame.rgba)
     }
     let keyframes = try compiler.keyframeTimes(capture: capture)
-    for frame in try await frames(of: asset, at: keyframes, edge: keyframeEdge) {
+    try await forEachFrame(of: asset, at: keyframes, edge: keyframeEdge) { frame in
       try compiler.addFullFrame(at: frame.t, width: frame.width, height: frame.height, rgba: frame.rgba)
     }
     let built = try compiler.compile(capture: capture)
@@ -73,20 +74,27 @@ enum OnDeviceBuild {
   /// The movie at `times` (ms), each fit to `edge` on its long side, as RGBA pixels. A time the
   /// movie can't give is skipped.
   static func frames(of asset: AVAsset, at times: [UInt64], edge: Int) async throws -> [Frame] {
+    var frames: [Frame] = []
+    try await forEachFrame(of: asset, at: times, edge: edge) { frames.append($0) }
+    return frames
+  }
+
+  /// `frames(of:at:edge:)`, one at a time: `body` gets each frame as it's decoded.
+  static func forEachFrame(
+    of asset: AVAsset, at times: [UInt64], edge: Int, _ body: (Frame) throws -> Void
+  ) async throws {
     let generator = AVAssetImageGenerator(asset: asset)
     generator.appliesPreferredTrackTransform = true
     generator.maximumSize = CGSize(width: edge, height: edge)
     generator.requestedTimeToleranceBefore = .zero
     generator.requestedTimeToleranceAfter = .zero
-    var frames: [Frame] = []
     for t in times {
       try Task.checkCancellation()
       guard let decoded = try? await generator.image(at: CMTime(value: CMTimeValue(t), timescale: 1000)),
             let frame = rgba(decoded.image, at: t)
       else { continue }
-      frames.append(frame)
+      try body(frame)
     }
-    return frames
   }
 
   private static func rgba(_ image: CGImage, at t: UInt64) -> Frame? {
@@ -135,7 +143,10 @@ enum OnDeviceSpeech {
     request.requiresOnDeviceRecognition = true
     request.shouldReportPartialResults = false
     request.addsPunctuation = true
-    guard let transcription = await recognize(request, with: recognizer) else {
+    // Offline recognition runs at a few times real time; past this it isn't coming.
+    let seconds = (try? await AVURLAsset(url: movie).load(.duration).seconds) ?? 0
+    let limit = Duration.seconds(60 + 2 * max(seconds.isFinite ? seconds : 0, 0))
+    guard let transcription = await recognize(request, with: recognizer, within: limit) else {
       return OnDeviceTranscript.missing("Speech recognition didn't finish")
     }
     let words = transcription.segments.map {
@@ -173,8 +184,9 @@ enum OnDeviceSpeech {
     }
   }
 
+  /// The final transcription, or nil on an error or when `limit` passes first.
   private static func recognize(
-    _ request: SFSpeechURLRecognitionRequest, with recognizer: SFSpeechRecognizer
+    _ request: SFSpeechURLRecognitionRequest, with recognizer: SFSpeechRecognizer, within limit: Duration
   ) async -> SFTranscription? {
     final class Once: @unchecked Sendable {
       private let lock = NSLock()
@@ -183,11 +195,19 @@ enum OnDeviceSpeech {
     }
     let once = Once()
     return await withCheckedContinuation { continuation in
-      _ = recognizer.recognitionTask(with: request) { result, error in
+      let task = recognizer.recognitionTask(with: request) { result, error in
         if let result, result.isFinal {
           if once.claim() { continuation.resume(returning: result.bestTranscription) }
         } else if error != nil {
           if once.claim() { continuation.resume(returning: nil) }
+        }
+      }
+      // The recognizer has no deadline of its own, and a build must not wait forever on it.
+      Task {
+        try? await Task.sleep(for: limit)
+        if once.claim() {
+          task.cancel()
+          continuation.resume(returning: nil)
         }
       }
     }

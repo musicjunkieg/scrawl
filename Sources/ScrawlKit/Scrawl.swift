@@ -1295,6 +1295,9 @@
         let createdAt = (try? Date(finished.recordedAt, strategy: .iso8601)) ?? Date()
         let directory = Self.directory
         isBuildingOnPhone = true
+        // Leaving the app ends an app-frames recording and starts this; ask for time to finish.
+        // A build longer than iOS allows fails and keeps the recording, with Share.
+        let background = BackgroundTime(named: "Scrawl bundle")
         let built = await Task.detached(priority: .userInitiated) { () -> Result<URL, any Error> in
           let transcript = await OnDeviceSpeech.transcript(of: recording.movie, narrated: narrated)
           do {
@@ -1306,6 +1309,7 @@
             return .failure(error)
           }
         }.value
+        background.end()
         isBuildingOnPhone = false
         switch built {
         case let .success(bundle):
@@ -1330,6 +1334,24 @@
         }
       }
     #endif
+
+    /// Time iOS allows the app to keep running in the background, held until `end()` (or until
+    /// iOS takes it back).
+    @MainActor private final class BackgroundTime {
+      private var id = UIBackgroundTaskIdentifier.invalid
+
+      init(named name: String) {
+        id = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+          MainActor.assumeIsolated { self?.end() }
+        }
+      }
+
+      func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
+      }
+    }
 
     /// HTTPS endpoint: the recording becomes an outbox entry (on disk before anything is sent) and
     /// the strip follows its upload: "Sending…" while it runs on a working network, however long
