@@ -74,6 +74,13 @@ struct BundleCompilerTests {
     #expect(throws: BundleCompiler.Failure.self) {
       try BundleCompiler.capture(timeline: timeline, width: 40, height: 80, durationMs: 1000, fields: ["createdAtMs": Date()])
     }
+    // {"app":"<0xFF>"}: not UTF-8, so not quietly read as "\u{FFFD}".
+    #expect(throws: BundleCompiler.Failure.self) {
+      try BundleCompiler.capture(
+        timeline: Data([0x7B, 0x22, 0x61, 0x70, 0x70, 0x22, 0x3A, 0x22, 0xFF, 0x22, 0x7D]),
+        width: 40, height: 80, durationMs: 1000
+      )
+    }
   }
 
   @Test func badInputThrowsInsteadOfCrashing() {
