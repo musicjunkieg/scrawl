@@ -61,11 +61,13 @@
     struct Sending: Equatable {
       var progress: Double?
       var stalled = false
+      /// Being built into a bundle on the phone (`compiles = .onDevice`), not uploaded.
+      var building = false
     }
 
     /// Why a recording didn't send; every failure keeps Share.
     enum Failure: Equatable {
-      case unreachable, linkExpired, tooLarge, rejected, notSaved
+      case unreachable, linkExpired, tooLarge, rejected, notSaved, notBuilt
 
       init(_ failure: Outbox.Failure) {
         switch failure {
@@ -82,6 +84,7 @@
         case .tooLarge: Notice("Too large to send")
         case .rejected: Notice("Couldn't send", detail: "The server rejected it")
         case .notSaved: Notice("Couldn't save to send")
+        case .notBuilt: Notice("Couldn't build it here", detail: "Share the recording instead")
         }
       }
     }
@@ -266,7 +269,7 @@
           ProgressView()
             .controlSize(.small)
             .tint(.white)
-            .accessibilityLabel("Sending recording")
+            .accessibilityLabel(model.sendBuilding ? "Building recording" : "Sending recording")
         }
       case .sent:
         Image(systemName: "checkmark")
@@ -300,7 +303,7 @@
         case let .sent(reply):
           sentText(reply)
         case let .sending(stalled):
-          Text(stalled ? "Still sending…" : "Sending…")
+          Text(model.sendBuilding ? "Building…" : stalled ? "Still sending…" : "Sending…")
         case .queued:
           Text("Queued · sends when online")
         case let .notice(notice):
@@ -368,6 +371,8 @@
         noticeText(Notice("On your Mac", detail: "Sending to \(Self.shortened(title, to: 30))…"))
       case .saved:
         Text("Saved on your Mac")
+      case .onPhone:
+        Text("Saved on this iPhone")
       }
     }
 
@@ -549,6 +554,8 @@
     /// How much of the upload has gone out, while sending.
     private(set) var sendProgress: Double?
     @ObservationIgnored private var sendStalled = false
+    /// The phone is building the bundle rather than sending the recording.
+    private(set) var sendBuilding = false
 
     @ObservationIgnored var side = StripSide.trailing {
       didSet { if side != oldValue { wake() } }
@@ -642,6 +649,7 @@
       }
       if case let .sending(sending) = mode {
         if sendProgress != sending.progress { sendProgress = sending.progress }
+        if sendBuilding != sending.building { sendBuilding = sending.building }
         if sendStalled != sending.stalled {
           sendStalled = sending.stalled
           // Already saying "Sending…": the text changes in place.

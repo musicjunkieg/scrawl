@@ -353,7 +353,8 @@
     /// Whether to turn off iOS's three-finger text-editing gestures (undo, redo, cut, copy, paste,
     /// and their Undo · Cut · Copy · Redo bar) in this app while ScrawlKit's three-finger trigger
     /// is installed, so starting a recording with a text field focused doesn't open that bar.
-    /// Only on paired (configured) devices; set `false` to keep the system gestures.
+    /// Only while ScrawlKit is active (paired, or `compiles = .onDevice`); set `false` to keep the
+    /// system gestures.
     public var suppressesSystemEditingGestures = true {
       didSet { syncSystemIntegration() }
     }
@@ -363,6 +364,36 @@
     }
     /// Whether to show the share sheet when a recording stops (used as fallback if Mac ingest is unreachable).
     public var sharesWhenDone = true
+
+    /// Where a recording becomes a `.scrawl` bundle.
+    public enum Compiling: Sendable {
+      /// Sent to Scrawl on the Mac (or its HTTPS endpoint), which builds it. The default.
+      case onMac
+      /// Built here on the phone with `ScrawlCore` (`SCRAWL_CORE=1`), the narration transcribed
+      /// with Apple's on-device speech, then handed to `onBundle`. Transcribing needs
+      /// `NSSpeechRecognitionUsageDescription` in the app's Info.plist; iOS asks the person once.
+      case onDevice
+    }
+
+    /// Where recordings become bundles: on the Mac (the default) or on this phone. Takes effect on
+    /// the next recording.
+    public var compiles: Compiling = .onMac {
+      didSet {
+        guard compiles != oldValue else { return }
+        notifyConfigurationChanged()
+        #if SCRAWL_CORE
+          if compiles == .onDevice { resumeInterruptedBuilds() }
+        #endif
+      }
+    }
+    /// Gets each bundle built on the phone (`compiles = .onDevice`): its `<id>.scrawl` folder in
+    /// `directory`, with the movie and timeline inside. Without it, the share sheet offers the
+    /// folder when `sharesWhenDone`.
+    public var onBundle: (@MainActor (URL) -> Void)?
+    /// The phone is building a recording's bundle (the strip says "Building…").
+    private(set) var isBuildingOnPhone = false
+    /// Interrupted on-device builds were looked for this launch (`resumeInterruptedBuilds`).
+    @ObservationIgnored private var resumedBuilds = false
     /// Candidate Scrawl ingest URLs on the Mac (from Keychain or launch args / env).
     public var serverURLs: [URL] = [] {
       didSet { notifyConfigurationChanged() }
@@ -381,6 +412,20 @@
 
     public var isConfigured: Bool {
       !serverURLs.isEmpty && !(token?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+    }
+
+    /// Whether ScrawlKit is in use here: paired with a Mac, or building bundles on the phone
+    /// (`compiles = .onDevice`, which needs no Mac). Otherwise it stays inert.
+    var isActive: Bool {
+      #if SCRAWL_CORE
+        isConfigured || compiles == .onDevice
+      #else
+        isConfigured
+      #endif
+    }
+
+    static var isActive: Bool {
+      shared.isActive
     }
 
     private init() {
@@ -425,7 +470,7 @@
       serverURLs = config?.urls ?? []
       token = config?.token
       sessionID = config?.sessionID
-      if !isConfigured {
+      if !isActive {
         if isRecording || isStarting {
           isRecording = false
           isStarting = false
@@ -451,10 +496,11 @@
     }
 
     /// The pieces that reach outside the app's own views (the editing-gesture override and the
-    /// keyboard tracker) run only on paired devices; unpaired, nothing is installed or observed.
+    /// keyboard tracker) run only while ScrawlKit is active (`isActive`); otherwise nothing is
+    /// installed or observed.
     func syncSystemIntegration() {
-      SystemEditingGestures.setSuppressed(isConfigured && suppressesSystemEditingGestures && threeFingerTriggers > 0)
-      KeyboardTracker.shared.setTracking(isConfigured)
+      SystemEditingGestures.setSuppressed(isActive && suppressesSystemEditingGestures && threeFingerTriggers > 0)
+      KeyboardTracker.shared.setTracking(isActive)
       syncOutbox()
     }
 
@@ -666,7 +712,7 @@
 
     /// Starts recording, or sends the current recording.
     public func toggle() {
-      guard isConfigured else { return }
+      guard isActive else { return }
       isRecording ? stop() : start()
     }
 
@@ -677,7 +723,7 @@
     }
 
     public func start() {
-      guard isConfigured, !isRecording, !isStarting else { return }
+      guard isActive, !isRecording, !isStarting else { return }
       let hosted = hostedURL != nil
       let recorder = captureMethod.makeRecorder(hosted: hosted)
       guard recorder.isAvailable else { return }
@@ -883,6 +929,14 @@
     }
 
     private func deliver(_ finished: FinishedRecording) async {
+      if compiles == .onDevice {
+        #if SCRAWL_CORE
+          await deliverOnDevice(finished)
+          return
+        #else
+          print("Scrawl: compiles = .onDevice needs ScrawlCore (build with SCRAWL_CORE=1); sending to the Mac")
+        #endif
+      }
       if hostedURL != nil {
         await deliverHosted(finished)
         return
@@ -1233,6 +1287,125 @@
         // Keep `.ready` so the Mac still picks the recording up the next time the phone is cabled.
         // The share sheet only opens if the strip's Share button is tapped.
         await presentFailure(.unreachable, recording: recording)
+      }
+    }
+
+    #if SCRAWL_CORE
+      /// On the phone: transcribe, build the bundle into `directory`, move the movie and timeline
+      /// into it, and hand it to `onBundle` (or the share sheet). A failed build keeps the
+      /// recording, with Share.
+      /// `recovered`: a build iOS ended last time (`resumeInterruptedBuilds`), which goes to
+      /// `onBundle` only, with no strip or share sheet.
+      private func deliverOnDevice(_ finished: FinishedRecording, recovered: Bool = false) async {
+        let recording = finished.recording
+        // Until this build is handled, so one iOS ends (the app killed in the background) is
+        // finished at the next launch.
+        let marker = Self.buildMarker(for: recording.movie)
+        try? Data().write(to: marker)
+        defer { try? FileManager.default.removeItem(at: marker) }
+        let timeline = finished.timelineData
+        let info = (try? JSONSerialization.jsonObject(with: timeline)) as? [String: Any]
+        let narrated = info?["audio"] as? Bool ?? false
+        let id = recording.movie.deletingPathExtension().lastPathComponent
+        let createdAt = (try? Date(finished.recordedAt, strategy: .iso8601)) ?? Date()
+        let directory = Self.directory
+        if !recovered { isBuildingOnPhone = true }
+        // Leaving the app ends an app-frames recording and starts this; ask for time to finish.
+        // A build longer than iOS allows fails and keeps the recording, with Share.
+        let background = BackgroundTime(named: "Scrawl bundle")
+        let built = await Task.detached(priority: .userInitiated) { () -> Result<URL, any Error> in
+          let transcript = await OnDeviceSpeech.transcript(of: recording.movie, narrated: narrated)
+          do {
+            return try await .success(OnDeviceBuild.build(
+              movie: recording.movie, timeline: timeline, id: id, createdAt: createdAt,
+              transcript: transcript, into: directory
+            ))
+          } catch {
+            return .failure(error)
+          }
+        }.value
+        background.end()
+        if !recovered { isBuildingOnPhone = false }
+        switch built {
+        case let .success(bundle):
+          // The bundle holds its own copies now.
+          for file in [recording.movie, recording.timeline] {
+            try? FileManager.default.removeItem(at: file)
+          }
+          recordings.append(Recording(
+            movie: bundle.appending(path: "recording.\(recording.movie.pathExtension.lowercased())"),
+            timeline: bundle.appending(path: "timeline.json")
+          ))
+          if let onBundle {
+            onBundle(bundle)
+          } else if sharesWhenDone, !recovered {
+            Self.share([bundle])
+          }
+          if !recovered { await presentSent(.onPhone) }
+        case let .failure(error):
+          print("Scrawl: building the bundle on the phone failed: \(error)")
+          recordings.append(recording)
+          if !recovered { await presentFailure(.notBuilt, recording: recording) }
+        }
+      }
+
+      private nonisolated static func buildMarker(for movie: URL) -> URL {
+        movie.deletingPathExtension().appendingPathExtension("building")
+      }
+
+      /// Builds again, once a launch, the recordings whose build iOS ended (a `.building` marker
+      /// left beside the movie): the app was killed in the background before it finished.
+      private func resumeInterruptedBuilds() {
+        guard !resumedBuilds else { return }
+        resumedBuilds = true
+        let manager = FileManager.default
+        var interrupted: [FinishedRecording] = []
+        for directory in [Self.directory, Self.stagingDirectory] {
+          let files = (try? manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+          for marker in files where marker.pathExtension == "building" {
+            let stem = marker.deletingPathExtension()
+            let timeline = stem.appendingPathExtension("json")
+            guard let movie = ["mp4", "mov"].map({ stem.appendingPathExtension($0) })
+              .first(where: { manager.fileExists(atPath: $0.path) }),
+              let data = try? Data(contentsOf: timeline)
+            else {
+              try? manager.removeItem(at: marker)
+              continue
+            }
+            let info = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            interrupted.append(FinishedRecording(
+              recording: Recording(movie: movie, timeline: timeline),
+              timelineData: data,
+              readyMarker: stem.appendingPathExtension("ready"),
+              sentMarker: stem.appendingPathExtension("sent"),
+              recordedAt: info?["recordedAt"] as? String ?? ""
+            ))
+          }
+        }
+        guard !interrupted.isEmpty else { return }
+        Task {
+          for finished in interrupted {
+            await self.deliverOnDevice(finished, recovered: true)
+          }
+        }
+      }
+    #endif
+
+    /// Time iOS allows the app to keep running in the background, held until `end()` (or until
+    /// iOS takes it back).
+    @MainActor private final class BackgroundTime {
+      private var id = UIBackgroundTaskIdentifier.invalid
+
+      init(named name: String) {
+        id = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+          MainActor.assumeIsolated { self?.end() }
+        }
+      }
+
+      func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
       }
     }
 

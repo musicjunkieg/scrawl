@@ -15,6 +15,8 @@ public enum IngestReply: Equatable, Sendable {
   case processing(sessionTitle: String)
   /// On the Mac and going no further (it has no session for this app).
   case saved
+  /// Built into a bundle on the phone (`Scrawl.Compiling.onDevice`) and handed to the app.
+  case onPhone
 
   /// Reads a 2xx response body.
   init(body: Data) {

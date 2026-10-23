@@ -396,6 +396,20 @@ Scrawl.event("Done tapped")              // optional: what the app did, on the t
 The host app needs `NSMicrophoneUsageDescription` in its Info.plist for narration (both capture
 methods use the microphone). Set `Scrawl.shared.narration = false` to record without it.
 
+To build bundles on the phone instead, with no Mac running Scrawl, link `ScrawlCore.xcframework`
+(`scripts/build-xcframework.sh`, then build with `SCRAWL_CORE=1`) and opt in:
+
+```swift
+Scrawl.shared.compiles = .onDevice
+Scrawl.shared.onBundle = { folder in upload(folder) }   // optional; otherwise the share sheet offers it
+```
+
+Each recording then becomes `Documents/Scrawl/<stamp>.scrawl` on the phone, built by the same
+compiler as the Mac's, with `recording.mp4` and `timeline.json` inside. The narration is transcribed
+offline with Apple's speech recognition, which needs `NSSpeechRecognitionUsageDescription` in the
+Info.plist; iOS asks once. Without the key, or if the person declines, the bundle has no transcript
+and `summary.md` says why. With `.onDevice`, ScrawlKit is active without pairing.
+
 `Scrawl.shared.captureMethod` picks how the video is made:
 
 - **`.appFrames`** (default): ScrawlKit draws the app's own windows into an H.264 `.mp4` at 30 fps
