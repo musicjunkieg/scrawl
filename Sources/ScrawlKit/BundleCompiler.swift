@@ -111,7 +111,11 @@ public final class BundleCompiler {
     }
     let fieldsJSON = try String(decoding: JSONSerialization.data(withJSONObject: fields), as: UTF8.self)
     var error: UnsafeMutablePointer<CChar>?
-    let json = String(decoding: timeline, as: UTF8.self).withCString { timeline in
+    // Not `String(decoding:)`, which would quietly turn bad bytes into U+FFFD.
+    guard let timelineJSON = String(data: timeline, encoding: .utf8) else {
+      throw Failure(description: "The timeline isn't UTF-8")
+    }
+    let json = timelineJSON.withCString { timeline in
       fieldsJSON.withCString { scrawl_capture_from_timeline(timeline, w, h, durationMs, $0, &error) }
     }
     guard let json else { throw failure(error) }
