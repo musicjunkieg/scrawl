@@ -22,6 +22,7 @@ enum OnDeviceBuild {
   static func build(
     movie: URL, timeline: Data, id: String, createdAt: Date, transcript: [String: Any], into directory: URL
   ) async throws -> URL {
+    print("Scrawl debug: build starts")
     let asset = AVURLAsset(url: movie)
     let durationMs = try await UInt64(max(asset.load(.duration).seconds, 0) * 1000)
     guard durationMs > 0, let track = try await asset.loadTracks(withMediaType: .video).first else {
@@ -43,6 +44,7 @@ enum OnDeviceBuild {
       ]
     )
 
+    print("Scrawl debug: decoding candidates")
     let compiler = BundleCompiler()
     let every = max(durationMs / maxCandidates, 250)
     let candidates = Array(stride(from: UInt64(0), to: durationMs, by: Int(every)))
@@ -51,10 +53,13 @@ enum OnDeviceBuild {
       try compiler.addFrame(at: frame.t, width: frame.width, height: frame.height, rgba: frame.rgba)
     }
     let keyframes = try compiler.keyframeTimes(capture: capture)
+    print("Scrawl debug: decoding \(keyframes.count) keyframes")
     try await forEachFrame(of: asset, at: keyframes, edge: keyframeEdge) { frame in
       try compiler.addFullFrame(at: frame.t, width: frame.width, height: frame.height, rgba: frame.rgba)
     }
+    print("Scrawl debug: compiling")
     let built = try compiler.compile(capture: capture)
+    print("Scrawl debug: writing")
 
     let manager = FileManager.default
     try? manager.removeItem(at: bundle)
@@ -132,6 +137,7 @@ enum OnDeviceSpeech {
       print("Scrawl: add NSSpeechRecognitionUsageDescription to the app's Info.plist to transcribe on the phone")
       return OnDeviceTranscript.missing("The app doesn't ask for speech recognition")
     }
+    print("Scrawl debug: speech status \(SFSpeechRecognizer.authorizationStatus().rawValue)")
     guard await authorized() else {
       return OnDeviceTranscript.missing("Speech recognition isn't allowed for this app")
     }
@@ -140,11 +146,13 @@ enum OnDeviceSpeech {
     else {
       return OnDeviceTranscript.missing("This phone can't recognize speech offline in its language")
     }
+    print("Scrawl debug: exporting audio")
     let audio = FileManager.default.temporaryDirectory.appending(path: "scrawl-\(UUID().uuidString).m4a")
     defer { try? FileManager.default.removeItem(at: audio) }
     guard await exportAudio(of: movie, to: audio) else {
       return OnDeviceTranscript.missing("The narration couldn't be read from the recording")
     }
+    print("Scrawl debug: recognizing")
     let request = SFSpeechURLRecognitionRequest(url: audio)
     request.requiresOnDeviceRecognition = true
     request.shouldReportPartialResults = false
@@ -169,6 +177,7 @@ enum OnDeviceSpeech {
     switch SFSpeechRecognizer.authorizationStatus() {
     case .authorized: return true
     case .notDetermined:
+      print("Scrawl debug: asking for speech permission")
       let status = await withCheckedContinuation { continuation in
         SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
       }

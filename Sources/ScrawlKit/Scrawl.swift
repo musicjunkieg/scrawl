@@ -1314,7 +1314,9 @@
         // A build longer than iOS allows fails and keeps the recording, with Share.
         let background = BackgroundTime(named: "Scrawl bundle")
         let built = await Task.detached(priority: .userInitiated) { () -> Result<URL, any Error> in
+          print("Scrawl debug: transcribing (narrated: \(narrated))")
           let transcript = await OnDeviceSpeech.transcript(of: recording.movie, narrated: narrated)
+          print("Scrawl debug: transcript done")
           do {
             return try await .success(OnDeviceBuild.build(
               movie: recording.movie, timeline: timeline, id: id, createdAt: createdAt,
