@@ -38,6 +38,36 @@ struct OnDeviceTranscriptTests {
   }
 }
 
+struct DeadlineTests {
+  @Test func theFirstAnswerCounts() async {
+    let answer: Int? = await Deadline.answer(within: .seconds(5)) { reply in
+      reply(1)
+      reply(2)
+      return {}
+    }
+    #expect(answer == 1)
+  }
+
+  @Test func noAnswerInTimeStopsTheWork() async {
+    final class Flag: @unchecked Sendable { var stopped = false }
+    let flag = Flag()
+    let answer: Int? = await Deadline.answer(within: .milliseconds(50)) { _ in { flag.stopped = true } }
+    #expect(answer == nil)
+    #expect(flag.stopped)
+  }
+
+  @Test func aLateAnswerIsIgnored() async {
+    let answer: Int? = await Deadline.answer(within: .milliseconds(50)) { reply in
+      Task {
+        try? await Task.sleep(for: .milliseconds(300))
+        reply(1)
+      }
+      return {}
+    }
+    #expect(answer == nil)
+  }
+}
+
 #if SCRAWL_CORE
   struct OnDeviceTranscriptCompileTests {
     /// The transcript JSON is what the compiler reads: its words reach `summary.md`.
@@ -114,7 +144,9 @@ struct OnDeviceTranscriptTests {
       #expect(!frames.isEmpty)
       let summary = try String(contentsOf: bundle.appending(path: "summary.md"), encoding: .utf8)
       #expect(summary.contains("Done tapped"))
-      #expect(summary.contains(bundle.path), "summary.md names its files by absolute path")
+      // It leaves the phone, so it's named by its folder, not by where it was built.
+      #expect(summary.contains("· 20261023T010000.scrawl]"))
+      #expect(!summary.contains(folder.path))
     }
 
     @Test func framesComeOutAtTheAskedSize() async throws {

@@ -1192,6 +1192,49 @@
         }
         current = view.superview
       }
+      return accessibilityLabel(at: point, in: window, above: hit)
+    }
+
+    /// SwiftUI draws its text without UILabels, so the walk above finds nothing in a SwiftUI view;
+    /// the accessibility elements it makes for VoiceOver carry the labels instead. The smallest
+    /// labeled element under `point`, from the nearest of `hit`'s ancestors that has one.
+    private static func accessibilityLabel(at point: CGPoint, in window: UIWindow, above hit: UIView) -> String? {
+      // Accessibility frames are in screen coordinates.
+      let onScreen = window.convert(point, to: window.screen.coordinateSpace)
+      var visited = 0
+      func children(of element: NSObject) -> [NSObject] {
+        if let elements = element.accessibilityElements {
+          return elements.compactMap { $0 as? NSObject }
+        }
+        let count = element.accessibilityElementCount()
+        guard count > 0, count != NSNotFound else { return [] }
+        return (0 ..< count).compactMap { element.accessibilityElement(at: $0) as? NSObject }
+      }
+      func smallest(in element: NSObject, depth: Int) -> (area: CGFloat, label: String)? {
+        var best: (area: CGFloat, label: String)?
+        for child in children(of: element) {
+          guard depth > 0, visited < 400 else { break }
+          visited += 1
+          let frame = child.accessibilityFrame
+          // A container with no frame of its own can still hold the element under the point.
+          if !frame.isEmpty, !frame.contains(onScreen) { continue }
+          if !frame.isEmpty, let label = cleanedLabel(child.accessibilityLabel),
+             best == nil || frame.width * frame.height < best!.area
+          {
+            best = (frame.width * frame.height, label)
+          }
+          if let inner = smallest(in: child, depth: depth - 1), best == nil || inner.area < best!.area {
+            best = inner
+          }
+        }
+        return best
+      }
+      var current: UIView? = hit
+      for _ in 0 ..< 7 {
+        guard let view = current else { break }
+        if let found = smallest(in: view, depth: 6) { return found.label }
+        current = view.superview
+      }
       return nil
     }
 

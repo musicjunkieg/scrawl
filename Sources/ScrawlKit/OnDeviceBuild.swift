@@ -15,10 +15,15 @@ enum OnDeviceBuild {
   static let keyframeEdge = 1600
   /// At most this many candidates, at least 250 ms apart.
   static let maxCandidates: UInt64 = 480
+  /// How long one frame may take. Right after a recording ends, iOS can leave the first request
+  /// unanswered; a fresh generator gets an answer.
+  static let frameDeadline: Duration = .seconds(4)
+  static let frameAttempts = 3
 
   /// Builds `<id>.scrawl` inside `directory` from `movie` and its `timeline` (the JSON ScrawlKit
   /// wrote), with `transcript` (`OnDeviceTranscript`) as what was said. Returns the bundle's
-  /// folder.
+  /// folder. `summary.md` names it by its folder name, since it won't stay in `directory`: the
+  /// app shares it or hands it on.
   static func build(
     movie: URL, timeline: Data, id: String, createdAt: Date, transcript: [String: Any], into directory: URL
   ) async throws -> URL {
@@ -36,7 +41,6 @@ enum OnDeviceBuild {
       timeline: timeline, width: width, height: height, durationMs: durationMs,
       fields: [
         "id": id,
-        "directory": bundle.path,
         "createdAtMs": UInt64(createdAt.timeIntervalSince1970 * 1000),
         "transcript": transcript,
         "video": videoName,
@@ -78,7 +82,7 @@ enum OnDeviceBuild {
   }
 
   /// The movie at `times` (ms), each fit to `edge` on its long side, as RGBA pixels. A time the
-  /// movie can't give is skipped.
+  /// movie can't give is skipped; one iOS never answers, however often it's asked, fails.
   static func frames(of asset: AVAsset, at times: [UInt64], edge: Int) async throws -> [Frame] {
     var frames: [Frame] = []
     try await forEachFrame(of: asset, at: times, edge: edge) { frames.append($0) }
@@ -89,18 +93,43 @@ enum OnDeviceBuild {
   static func forEachFrame(
     of asset: AVAsset, at times: [UInt64], edge: Int, _ body: (Frame) throws -> Void
   ) async throws {
+    var generator = makeGenerator(asset, edge: edge)
+    for t in times {
+      try Task.checkCancellation()
+      guard let picture = try await image(at: t, from: asset, edge: edge, generator: &generator),
+            let frame = rgba(picture, at: t)
+      else { continue }
+      try body(frame)
+    }
+  }
+
+  private static func makeGenerator(_ asset: AVAsset, edge: Int) -> AVAssetImageGenerator {
     let generator = AVAssetImageGenerator(asset: asset)
     generator.appliesPreferredTrackTransform = true
     generator.maximumSize = CGSize(width: edge, height: edge)
     generator.requestedTimeToleranceBefore = .zero
     generator.requestedTimeToleranceAfter = .zero
-    for t in times {
-      try Task.checkCancellation()
-      guard let decoded = try? await generator.image(at: CMTime(value: CMTimeValue(t), timescale: 1000)),
-            let frame = rgba(decoded.image, at: t)
-      else { continue }
-      try body(frame)
+    return generator
+  }
+
+  /// The movie at `t`, or nil when it has no picture there. A request iOS doesn't answer within
+  /// `frameDeadline` is cancelled and asked of a fresh generator, which replaces `generator`.
+  private static func image(
+    at t: UInt64, from asset: AVAsset, edge: Int, generator: inout AVAssetImageGenerator
+  ) async throws -> CGImage? {
+    for _ in 1 ... frameAttempts {
+      let asking = generator
+      let answer: CGImage?? = await Deadline.answer(within: frameDeadline) { reply in
+        asking.generateCGImageAsynchronously(for: CMTime(value: CMTimeValue(t), timescale: 1000)) { image, _, _ in
+          reply(image)
+        }
+        return { asking.cancelAllCGImageGeneration() }
+      }
+      if let answer { return answer }
+      print("Scrawl: the recording's frame at \(t) ms didn't come; asking again")
+      generator = makeGenerator(asset, edge: edge)
     }
+    throw BundleCompiler.Failure(description: "The recording's frames couldn't be read")
   }
 
   private static func rgba(_ image: CGImage, at t: UInt64) -> Frame? {
@@ -194,29 +223,18 @@ enum OnDeviceSpeech {
   private static func recognize(
     _ request: SFSpeechURLRecognitionRequest, with recognizer: SFSpeechRecognizer, within limit: Duration
   ) async -> SFTranscription? {
-    final class Once: @unchecked Sendable {
-      private let lock = NSLock()
-      private var done = false
-      func claim() -> Bool { lock.withLock { defer { done = true }; return !done } }
-    }
-    let once = Once()
-    return await withCheckedContinuation { continuation in
+    // The recognizer has no deadline of its own, and a build must not wait forever on it.
+    let answer: SFTranscription?? = await Deadline.answer(within: limit) { reply in
       let task = recognizer.recognitionTask(with: request) { result, error in
         if let result, result.isFinal {
-          if once.claim() { continuation.resume(returning: result.bestTranscription) }
+          reply(result.bestTranscription)
         } else if error != nil {
-          if once.claim() { continuation.resume(returning: nil) }
+          reply(nil)
         }
       }
-      // The recognizer has no deadline of its own, and a build must not wait forever on it.
-      Task {
-        try? await Task.sleep(for: limit)
-        if once.claim() {
-          task.cancel()
-          continuation.resume(returning: nil)
-        }
-      }
+      return { task.cancel() }
     }
+    return answer ?? nil
   }
 }
 
