@@ -22,7 +22,8 @@ enum OnDeviceBuild {
   static func build(
     movie: URL, timeline: Data, id: String, createdAt: Date, transcript: [String: Any], into directory: URL
   ) async throws -> URL {
-    print("Scrawl debug: build starts")
+    print("Scrawl debug: build starts, waiting 3 s")
+    try? await Task.sleep(for: .seconds(3))
     let asset = AVURLAsset(url: movie)
     let durationMs = try await UInt64(max(asset.load(.duration).seconds, 0) * 1000)
     guard durationMs > 0, let track = try await asset.loadTracks(withMediaType: .video).first else {
@@ -99,8 +100,9 @@ enum OnDeviceBuild {
     generator.maximumSize = CGSize(width: edge, height: edge)
     generator.requestedTimeToleranceBefore = .zero
     generator.requestedTimeToleranceAfter = .zero
-    for t in times {
+    for (n, t) in times.enumerated() {
       try Task.checkCancellation()
+      if n < 3 || n % 50 == 0 { print("Scrawl debug: frame \(n) of \(times.count) at \(t) ms") }
       guard let decoded = try? await generator.image(at: CMTime(value: CMTimeValue(t), timescale: 1000)),
             let frame = rgba(decoded.image, at: t)
       else { continue }
