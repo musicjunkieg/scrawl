@@ -15,7 +15,10 @@ phone (`Scrawl.shared.compiles = .onDevice`), with no Mac running Scrawl.
 
    It makes `target/ScrawlCore.xcframework`, which ScrawlKit picks up on its own. If Xcode had the
    demo open already, choose **File → Packages → Reset Package Caches** so it notices.
-2. Open `Examples/ScrawlDemo.swiftpm` in Xcode (double-click it, or `open Examples/ScrawlDemo.swiftpm`).
+2. Open the demo in Xcode: `open -a Xcode Examples/ScrawlDemo.swiftpm`. Double-clicking it opens
+   Swift Playgrounds, which can't build it (it links the compiler from step 1, and says it "depends
+   on a binary library"). If Xcode offers to download the Metal Toolchain, choose **Continue
+   without Downloading**; nothing here uses Metal.
 3. In Xcode, choose the ScrawlDemo app, then **Signing & Capabilities**, and pick your Team (a
    free Apple ID works).
 4. Plug in the iPhone, pick it as the run destination at the top, and press **Run** (⌘R). The

@@ -188,7 +188,13 @@ pub fn ms(seconds: f64) -> u64 {
 const TAP_SLOP_PT: f64 = 12.0;
 const TAP_MS: u64 = 420;
 
-/// Turns raw touch samples into taps and swipes, normalized to the screen.
+/// Ink that never moves further than this many points from where it started draws nothing: a tap
+/// made while Draw was on.
+const DOT_PT: f64 = 6.0;
+
+/// Turns raw touch samples into taps and swipes, normalized to the screen. A touch still down
+/// when the recording ends is left out: that's the press that stopped it (ScrawlKit's
+/// three-finger trigger), not something done in the app.
 pub fn touch_events(touches: &[Touch], screen: Screen) -> Vec<InteractionEvent> {
     let mut sorted = touches.to_vec();
     sorted.sort_by(|a, b| a.t.total_cmp(&b.t));
@@ -267,9 +273,6 @@ pub fn touch_events(touches: &[Touch], screen: Screen) -> Vec<InteractionEvent> 
             (_, None) => open.push((touch.id, vec![touch])),
         }
     }
-    for (_, samples) in open {
-        close(samples, &mut out);
-    }
     out.sort_by_key(InteractionEvent::timestamp_ms);
     out
 }
@@ -295,6 +298,12 @@ impl Timeline {
         let strokes: Vec<Stroke> = self
             .strokes
             .iter()
+            .filter(|s| {
+                let [x0, y0, _] = s.points.first().copied().unwrap_or_default();
+                s.points
+                    .iter()
+                    .any(|&[x, y, _]| (x - x0).hypot(y - y0) >= DOT_PT)
+            })
             .filter_map(|s| {
                 let t0 = ms(s.t0);
                 let t1 = ms(s.t1).max(t0);
@@ -401,6 +410,10 @@ mod tests {
                 // A touch the system took over still ends.
                 touch(5.0, 4, 300.0, 400.0, "down"),
                 touch(5.1, 4, 380.0, 400.0, "cancel"),
+                // The three fingers that stopped the recording never lift before it ends.
+                touch(9.0, 5, 100.0, 600.0, "down"),
+                touch(9.0, 6, 200.0, 620.0, "down"),
+                touch(9.0, 7, 300.0, 610.0, "move"),
             ],
             screen,
         );
@@ -528,7 +541,9 @@ mod tests {
             "events":[{"t":1.5,"label":"Done tapped"}],
             "touches":[{"t":1.0,"id":1,"x":200,"y":400,"phase":"down","label":"Done"},
                 {"t":1.05,"id":1,"x":200,"y":400,"phase":"up"}],
-            "strokes":[{"t0":2.0,"t1":2.2,"points":[[100,200,2.0],[300,600,2.2]]}],
+            "strokes":[{"t0":2.0,"t1":2.2,"points":[[100,200,2.0],[300,600,2.2]]},
+                {"t0":2.4,"t1":2.4,"points":[[250,700,2.4]]},
+                {"t0":2.6,"t1":2.7,"points":[[50,50,2.6],[52,53,2.7]]}],
             "context":{"session":"ses_1"},"screens":[{"t":0,"name":"Workout"}]}"#;
         let timeline: Timeline = serde_json::from_str(json).unwrap();
         let capture = timeline.capture(1200, 2400, 3_000);
@@ -550,6 +565,8 @@ mod tests {
             &capture.events[1],
             InteractionEvent::AppEvent { t: 1_500, .. }
         ));
+        // Taps made while Draw was on, which never moved, aren't ink.
+        assert_eq!(capture.strokes.len(), 1);
         // Points go to the bundle's 0–10 000 coordinates, times relative to the stroke.
         let stroke = &capture.strokes[0];
         assert_eq!((stroke.fw, stroke.fh), (1200, 2400));
