@@ -1202,19 +1202,23 @@
       // Accessibility frames are in screen coordinates.
       let onScreen = window.convert(point, to: window.screen.coordinateSpace)
       var visited = 0
-      func children(of element: NSObject) -> [NSObject] {
+      // Fetched one at a time, so a container with thousands of elements costs only the budget.
+      func children(of element: NSObject) -> (count: Int, at: (Int) -> NSObject?) {
         if let elements = element.accessibilityElements {
-          return elements.compactMap { $0 as? NSObject }
+          return (elements.count, { elements[$0] as? NSObject })
         }
         let count = element.accessibilityElementCount()
-        guard count > 0, count != NSNotFound else { return [] }
-        return (0 ..< count).compactMap { element.accessibilityElement(at: $0) as? NSObject }
+        guard count > 0, count != NSNotFound else { return (0, { _ in nil }) }
+        return (count, { element.accessibilityElement(at: $0) as? NSObject })
       }
       func smallest(in element: NSObject, depth: Int) -> (area: CGFloat, label: String)? {
+        guard depth > 0 else { return nil }
         var best: (area: CGFloat, label: String)?
-        for child in children(of: element) {
-          guard depth > 0, visited < 400 else { break }
+        let elements = children(of: element)
+        for index in 0 ..< elements.count {
+          guard visited < 400 else { break }
           visited += 1
+          guard let child = elements.at(index) else { continue }
           let frame = child.accessibilityFrame
           // A container with no frame of its own can still hold the element under the point.
           if !frame.isEmpty, !frame.contains(onScreen) { continue }
