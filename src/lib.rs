@@ -796,6 +796,7 @@ pub fn run() -> Result<()> {
                                 context: old.context.clone(),
                                 context_changes: old.context_changes.clone(),
                                 screens: old.screens.clone(),
+                                still_swipes: phone::still_swipes_in(&dir),
                             },
                         )?;
                         let _ = handoff::copy_bundle_to_clipboard(&iter_out);
@@ -930,6 +931,7 @@ pub fn run() -> Result<()> {
                         context: old.context,
                         context_changes: old.context_changes,
                         screens: old.screens,
+                        still_swipes: phone::still_swipes_in(&dir),
                     },
                 )?
                 .2

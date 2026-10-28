@@ -107,6 +107,25 @@ fn context_text(value: &serde_json::Value) -> Option<String> {
 }
 
 impl Timeline {
+    /// The start times (ms) of touches the app marked `still`: swipes that left their scroll view
+    /// where it was.
+    pub fn still_swipes(&self) -> Vec<u64> {
+        let mut starts: BTreeMap<i64, f64> = BTreeMap::new();
+        for touch in &self.touches {
+            let start = starts.entry(touch.id).or_insert(touch.t);
+            *start = start.min(touch.t);
+        }
+        let mut still: Vec<u64> = self
+            .touches
+            .iter()
+            .filter(|touch| touch.still == Some(true))
+            .filter_map(|touch| starts.get(&touch.id).map(|&t| ms(t)))
+            .collect();
+        still.sort_unstable();
+        still.dedup();
+        still
+    }
+
     pub fn context(&self) -> BTreeMap<String, String> {
         self.context
             .iter()
@@ -173,6 +192,10 @@ pub struct Touch {
     pub phase: String,
     #[serde(default)]
     pub label: Option<String>,
+    /// On a touch's last sample: whether the scroll view it moved came back to rest where it
+    /// started, so the swipe changed nothing on screen. Absent when the app couldn't tell.
+    #[serde(default)]
+    pub still: Option<bool>,
 }
 
 /// Seconds on the timeline as milliseconds (0 for negative or non-finite).
@@ -371,7 +394,8 @@ impl Timeline {
             video: None,
             audio: None,
             agent_context: false,
-            still_actions: false,
+            still_swipes: self.still_swipes(),
+            skip_still_swipes: false,
             page: Vec::new(),
         }
     }
@@ -389,7 +413,26 @@ mod tests {
             y,
             phase: phase.into(),
             label: None,
+            still: None,
         }
+    }
+
+    #[test]
+    fn swipes_the_app_marked_still_are_listed_by_their_start() {
+        let json = r#"{"touches":[
+            {"t":1.0,"id":1,"x":200,"y":700,"phase":"down"},
+            {"t":1.2,"id":1,"x":200,"y":300,"phase":"move"},
+            {"t":1.3,"id":1,"x":200,"y":250,"phase":"up","still":true},
+            {"t":2.0,"id":2,"x":200,"y":700,"phase":"down"},
+            {"t":2.3,"id":2,"x":200,"y":250,"phase":"up","still":false},
+            {"t":3.0,"id":3,"x":200,"y":700,"phase":"down"},
+            {"t":3.3,"id":3,"x":200,"y":250,"phase":"up"}]}"#;
+        let timeline: Timeline = serde_json::from_str(json).unwrap();
+        assert_eq!(timeline.still_swipes(), vec![1_000]);
+        let capture = timeline.capture(400, 800, 4_000);
+        assert_eq!(capture.still_swipes, vec![1_000]);
+        // The listed swipe is the event that starts then.
+        assert!(capture.events.iter().any(|e| matches!(e, InteractionEvent::Drag { t: 1_000, .. })));
     }
 
     #[test]

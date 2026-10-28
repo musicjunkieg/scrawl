@@ -25,7 +25,8 @@ enum OnDeviceBuild {
   /// folder. `summary.md` names it by its folder name, since it won't stay in `directory`: the
   /// app shares it or hands it on.
   static func build(
-    movie: URL, timeline: Data, id: String, createdAt: Date, transcript: [String: Any], into directory: URL
+    movie: URL, timeline: Data, id: String, createdAt: Date, transcript: [String: Any],
+    experiments: Set<String> = [], into directory: URL
   ) async throws -> URL {
     let asset = AVURLAsset(url: movie)
     let durationMs = try await UInt64(max(asset.load(.duration).seconds, 0) * 1000)
@@ -44,6 +45,7 @@ enum OnDeviceBuild {
         "createdAtMs": UInt64(createdAt.timeIntervalSince1970 * 1000),
         "transcript": transcript,
         "video": videoName,
+        "skipStillSwipes": experiments.contains("skipStillSwipes"),
       ]
     )
 

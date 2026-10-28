@@ -22,8 +22,9 @@ pub struct BuildOptions {
     /// The `agentContext` experiment: numbered marks on shared frames and the extra context in
     /// `summary.md`.
     pub agent_context: bool,
-    /// The `stillActions` experiment (`keyframes::Selection::still_actions`).
-    pub still_actions: bool,
+    /// The `skipStillSwipes` experiment: swipes the app says moved nothing
+    /// (`SourceExtras::still_swipes`) cut no keyframe.
+    pub skip_still_swipes: bool,
     /// Autocrop for Display captures that don't pass their own (`SourceExtras::autocrop`);
     /// `None` leaves them uncropped.
     pub autocrop: Option<autocrop::Settings>,
@@ -34,13 +35,6 @@ pub struct BuildOptions {
 }
 
 impl BuildOptions {
-    /// The experiments that change which keyframes are chosen.
-    pub fn selection(&self) -> Selection {
-        Selection {
-            still_actions: self.still_actions,
-        }
-    }
-
     fn log(&self, message: impl AsRef<str>) {
         if let Some(logger) = self.logger {
             logger(message.as_ref());
@@ -193,6 +187,9 @@ pub struct SourceExtras {
     pub cursor: Vec<CursorSample>,
     /// Time-only markers (ms); each becomes a `Flag` mark with keyframe priority.
     pub flags: Vec<u64>,
+    /// Swipes the app says moved nothing (start ms; `Timeline::still_swipes`), which
+    /// `BuildOptions::skip_still_swipes` keeps from cutting keyframes.
+    pub still_swipes: Vec<u64>,
     /// When the video starts on the bundle's clock (ms).
     pub video_offset_ms: u64,
     /// Screen-capture auto-crop: `None` follows the config, `Some(None)` is off.
@@ -388,7 +385,13 @@ fn build_files(
         &events,
         &transcript,
         keyframe_budget(duration_ms),
-        options.selection(),
+        Selection {
+            still_swipes: if options.skip_still_swipes {
+                &extras.still_swipes
+            } else {
+                &[]
+            },
+        },
     );
     let select_only_at = crate::clock::Instant::now();
     // Visuals rendered while transcription ran are used when they were made for the same keyframes.
