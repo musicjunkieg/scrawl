@@ -123,8 +123,9 @@
     /// from.
     @ObservationIgnored private var startArea: CGRect = .zero
     @ObservationIgnored private var startWindowFrame: CGRect = .zero
-    /// The area the capture was last given.
+    /// The area the capture was last given, and the one it started with.
     @ObservationIgnored private var capturedArea: CGRect = .zero
+    @ObservationIgnored private var startCapturedArea: CGRect = .zero
     @ObservationIgnored private var scale: CGFloat = 1
     /// Host time (seconds) of the movie's first frame: the timeline's zero.
     @ObservationIgnored private var zero: Double?
@@ -192,6 +193,7 @@
       self.area = area
       startArea = area
       startWindowFrame = window.frame
+      capturedArea = .zero
       display = screen.frame
       scale = screen.backingScaleFactor
       zero = nil
@@ -237,6 +239,7 @@
         // The window may have moved while the microphone prompt was up.
         windowMoved()
         capturedArea = self.area
+        startCapturedArea = self.area
         let source = MacGeometry.sourceRect(of: self.area, on: display)
         // Nothing in a few seconds (a window that never draws, a stuck capture): give up.
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
@@ -288,16 +291,20 @@
       isRecording = true
       ScrawlAppContext.shared.begin(at: startedAt)
       overlay?.show("● Recording · \(shortcut.symbols) sends · hold ⇧ to draw")
-      // Catches a move made while the capture was starting.
-      windowMoved()
+      // A move made before the stream existed was dropped: send the area again if it moved.
+      if area != startCapturedArea {
+        capturedArea = area
+        recorder.move(to: MacGeometry.sourceRect(of: area, on: display))
+      }
     }
 
-    /// Keeps the recorded area, the overlay and (once recording) the capture on the window.
+    /// Keeps the recorded area, the overlay and (once it has an area) the capture on the window.
     private func windowMoved() {
       guard isRecording || isStarting, let window else { return }
       area = MacGeometry.moved(startArea, from: startWindowFrame, to: window.frame, on: display)
       overlay?.move(to: area)
-      if isRecording, area != capturedArea {
+      // `capturedArea` is zero until the capture is handed its area, after the microphone prompt.
+      if capturedArea != .zero, area != capturedArea {
         capturedArea = area
         recorder?.move(to: MacGeometry.sourceRect(of: area, on: display))
       }
