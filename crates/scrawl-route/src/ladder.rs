@@ -10,6 +10,7 @@
 //! come in through [`Hooks`]; the Scrawl app passes `lsof` and `opencode2 api`.
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use scrawl_bundle::Destination;
@@ -102,8 +103,7 @@ pub fn session_for_directory(
     root: &Path,
     whole_tree: bool,
 ) -> Result<Option<OpenCodeSession>> {
-    let home = dirs::home_dir();
-    if root == Path::new("/") || Some(root) == home.as_deref() {
+    if smart::is_home_or_root(root) {
         return Ok(None);
     }
     let directory = format!("&directory={}", query_escape(&root.to_string_lossy()));
@@ -134,8 +134,30 @@ pub fn session_for_directory(
 pub struct Hooks {
     pub sdk: fn(&str) -> Option<Registration>,
     pub listener_dir: fn(u16) -> Option<PathBuf>,
-    /// One `GET` against OpenCode's API.
-    pub api: fn(&str) -> Result<Vec<u8>>,
+    /// One `GET` against OpenCode's API, given up after the time given.
+    pub api: fn(&str, Duration) -> Result<Vec<u8>>,
+}
+
+/// How long one capture's routing may spend reading sessions, all requests together.
+pub const SESSIONS_BUDGET: Duration = Duration::from_secs(3);
+
+/// `api` limited to `budget` in all, counted from its first request: each request gets what's
+/// left, and none starts after.
+pub fn within(
+    api: fn(&str, Duration) -> Result<Vec<u8>>,
+    budget: Duration,
+) -> impl FnMut(&str) -> Result<Vec<u8>> {
+    let mut deadline = None;
+    move |path| {
+        let deadline = *deadline.get_or_insert_with(|| Instant::now() + budget);
+        let left = deadline.saturating_duration_since(Instant::now());
+        anyhow::ensure!(
+            !left.is_zero(),
+            "OpenCode took over {} ms to list sessions",
+            budget.as_millis()
+        );
+        api(path, left)
+    }
 }
 
 /// Where a capture of `url` goes, or why it goes nowhere.
@@ -148,11 +170,10 @@ pub fn route(url: &str, hooks: &Hooks) -> std::result::Result<Destination, Strin
         url: Some(url.to_owned()),
         directory: dir.map(|d| d.display().to_string()),
     };
-    let mut api = hooks.api;
-    let by_directory = |dir: &Path, via: &str| {
+    let mut api = within(hooks.api, SESSIONS_BUDGET);
+    let by_directory = |api: &mut ApiGet, dir: &Path, via: &str| {
         let (root, git) = project_root(dir);
-        let mut api = hooks.api;
-        session_for_directory(&mut api, &root, git)
+        session_for_directory(api, &root, git)
             .map_err(|err| format!("couldn't list sessions: {err:#}"))?
             .map(|s| destination(&s, via, Some(&root)))
             .ok_or_else(|| format!("no open OpenCode session in {}", root.display()))
@@ -171,7 +192,7 @@ pub fn route(url: &str, hooks: &Hooks) -> std::result::Result<Destination, Strin
             });
         }
         if let Some(dir) = reg.directory.as_deref() {
-            return by_directory(Path::new(dir), "sdk");
+            return by_directory(&mut api, Path::new(dir), "sdk");
         }
     }
     if !parsed.is_loopback() {
@@ -179,7 +200,7 @@ pub fn route(url: &str, hooks: &Hooks) -> std::result::Result<Destination, Strin
     }
     let dir = (hooks.listener_dir)(parsed.port)
         .ok_or_else(|| format!("no process found listening on port {}", parsed.port))?;
-    by_directory(&dir, "localhost")
+    by_directory(&mut api, &dir, "localhost")
 }
 
 /// The evidence and decision behind a capture's routing, saved beside it so
@@ -205,22 +226,10 @@ pub fn read_record(dir: &Path) -> Option<smart::Evidence> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::opencode::{OpenCodeSessionLocation, OpenCodeSessionTime, fake_api};
+    use crate::opencode::fake_api;
 
     fn session(id: &str, dir: &str, updated: u64) -> OpenCodeSession {
-        OpenCodeSession {
-            id: id.into(),
-            title: id.to_uppercase(),
-            parent_id: None,
-            time: OpenCodeSessionTime {
-                updated,
-                archived: None,
-            },
-            location: Some(OpenCodeSessionLocation {
-                directory: Some(dir.into()),
-            }),
-            directory: None,
-        }
+        fake_api::session(id, &id.to_uppercase(), dir, updated)
     }
 
     #[test]
@@ -344,7 +353,7 @@ mod tests {
     fn listener(port: u16) -> Option<PathBuf> {
         (port == 4321).then(|| PathBuf::from("/p/app"))
     }
-    fn api(path: &str) -> Result<Vec<u8>> {
+    fn api(path: &str, _: Duration) -> Result<Vec<u8>> {
         fake_api::serve(
             &[
                 session("ses_sdk", "/elsewhere", 5),
@@ -352,6 +361,60 @@ mod tests {
             ],
             path,
         )
+    }
+
+    fn down(_: &str, _: Duration) -> Result<Vec<u8>> {
+        anyhow::bail!("OpenCode API failed: Error: Could not reach server at http://127.0.0.1:4096")
+    }
+    /// Answers each request after 200 ms, or fails once the time it's given runs out.
+    fn slow(path: &str, left: Duration) -> Result<Vec<u8>> {
+        let delay = Duration::from_millis(200);
+        std::thread::sleep(delay.min(left));
+        anyhow::ensure!(left >= delay, "no answer");
+        let sessions: Vec<_> = (0..250)
+            .map(|i| session(&format!("ses_{i}"), "/q", 1_000 + i))
+            .chain([session("ses_app", "/p/app", 10)])
+            .collect();
+        fake_api::serve(&sessions, path)
+    }
+
+    #[test]
+    fn a_down_or_slow_server_costs_routing_a_bounded_time() {
+        let hooks = Hooks {
+            sdk: no_sdk,
+            listener_dir: listener,
+            api: down,
+        };
+        let started = Instant::now();
+        let err = route("http://127.0.0.1:4321/", &hooks).unwrap_err();
+        assert!(err.contains("Could not reach server"), "{err}");
+        assert!(started.elapsed() < Duration::from_millis(100));
+
+        // Every request shares one budget, counted from the first: reading pages stops when
+        // it's spent instead of waiting out each request in turn.
+        let budget = Duration::from_millis(500);
+        let mut requests = 0;
+        let mut api = within(slow, budget);
+        let started = Instant::now();
+        let result = session_for_directory(
+            &mut |path: &str| {
+                requests += 1;
+                api(path)
+            },
+            Path::new("/p/app"),
+            true,
+        );
+        assert!(result.is_err());
+        // The exact folder and a first page of the whole list answer, the second page gets the
+        // last 100 ms and fails, and no more are asked: 500 ms, not the 1.2 s six requests take.
+        let took = started.elapsed();
+        assert!((2..4).contains(&requests), "{requests}");
+        assert!(took < Duration::from_millis(700), "{took:?}");
+
+        // A server that answers in time routes as usual.
+        let hooks = Hooks { api: slow, ..hooks };
+        let local = route("http://127.0.0.1:4321/", &hooks).unwrap();
+        assert_eq!(local.session, "ses_app");
     }
 
     #[test]

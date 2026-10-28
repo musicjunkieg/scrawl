@@ -28,6 +28,8 @@ use crate::helper::{FrameTimes, Probe};
 use crate::model::RgbaFrame;
 // The recorder is `scrawl-capture`'s (`native::wgc`); decoding below shares its Media
 // Foundation setup.
+#[cfg(test)]
+pub use scrawl_capture::native::wgc::write_test_movie;
 use scrawl_capture::native::wgc::{media_startup, unpack};
 
 /// The recording thread: Windows.Graphics.Capture and Media Foundation

@@ -10,6 +10,7 @@ const SITE = "https://scrawl.kitlangton.com"
 const REPO = "https://github.com/kitlangton/scrawl"
 const RAW_SKILL = "https://raw.githubusercontent.com/kitlangton/scrawl/main/skills/scrawl/SKILL.md"
 const DMG = `${SITE}/releases/Scrawl-latest-arm64.dmg`
+const WINDOWS_ZIP = `${SITE}/releases/Scrawl-latest-windows-x64.zip`
 
 const repo = (path: string) => readFileSync(fileURLToPath(new URL(`../../${path}`, import.meta.url)), "utf8")
 
@@ -78,7 +79,7 @@ export function agentFiles(): Record<string, string> {
   const requires = `Apple silicon Mac, macOS ${macos} or later`
   const tagline = readme.split("\n").find((l) => l && !l.startsWith("#"))!.trim()
   const intro = readme.split(/\n## /)[0].split("\n\n").slice(2).join("\n\n").trim()
-  const summary = `> ${tagline} Scrawl is a Mac app that records your screen, voice, clicks and drawings and packs them into a bundle an AI coding agent can read. Version ${version}, for an ${requires}.`
+  const summary = `> ${tagline} Scrawl is a Mac and Windows app that records your screen, voice, clicks and drawings and packs them into a bundle an AI coding agent can read. Version ${version}, for an ${requires}, with a preview for Windows 10 and 11 (x64).`
 
   const llms = `# Scrawl
 
@@ -90,6 +91,7 @@ ${intro}
 
 - [Download for Mac](${DMG}): the DMG of version ${version}, for an ${requires}. The app updates itself with Sparkle.
 - [Homebrew tap](https://github.com/kitlangton/homebrew-tap): \`brew install --cask kitlangton/tap/scrawl\`.
+- [Download for Windows](${WINDOWS_ZIP}): a zip with \`scrawl.exe\` for Windows 10 (2004) and later on x64, version ${version}. It's a preview and isn't signed yet, so SmartScreen may warn ("More info", then "Run anyway"), and it doesn't update itself.
 
 ## Agents
 
@@ -103,7 +105,7 @@ ${intro}
 
 ## CLI
 
-The \`scrawl\` command is the binary inside Scrawl.app and runs on the Mac where Scrawl is installed. Most commands take a bundle path or \`latest\`.
+The \`scrawl\` command is the binary inside Scrawl.app (on Windows, \`scrawl.exe\`) and runs on the computer where Scrawl is installed. Most commands take a bundle path or \`latest\`.
 
 ${commands(skill).join("\n")}
 
@@ -122,7 +124,7 @@ ${intro}
 
 Website: ${SITE}
 Source: ${REPO}
-Download: ${DMG}
+Download: ${DMG} (Mac), ${WINDOWS_ZIP} (Windows preview)
 
 ## Install
 
@@ -162,10 +164,10 @@ export function jsonLd(): string {
     name: "Scrawl",
     description: "Show an agent a problem instead of describing it. Scrawl records your screen, voice, clicks and drawings and packs them into a bundle an AI coding agent can read.",
     url: `${SITE}/`,
-    operatingSystem: `macOS ${macos}`,
+    operatingSystem: `macOS ${macos}, Windows 10, Windows 11`,
     applicationCategory: "DeveloperApplication",
     softwareVersion: version,
-    downloadUrl: DMG,
+    downloadUrl: [DMG, WINDOWS_ZIP],
     image: `${SITE}/og.png`,
     offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
     author: { "@type": "Person", name: "Kit Langton" },

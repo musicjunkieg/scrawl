@@ -2,6 +2,12 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+// Times recording start (`recording_start_ms`, main-thread time in `start_recording_with_target`)
+// and its stages, through the real picker, Metal overlay, microphone and ScreenCaptureKit.
+//   bun scripts/bench-start.ts [--quick-stop]
+// `--quick-stop` stops both workers at once, checking clean joins rather than timing. Needs Screen
+// Recording and Microphone grants, `ffprobe`, and an awake screen someone is using:
+// `perf/screen-guard.sh` refuses on the Studio, so run it on the MacBook Pro under `/tmp/pro-gui.lock`.
 // One process: warmup + seven starts, matching repeated captures in the menu-bar app.
 // Build separately so compiler/cache state never enters the timing.
 const binary = resolve(process.env.SCRAWL_BIN ?? "target/debug/scrawl");
@@ -12,8 +18,11 @@ const summarize = (xs: number[]) => {
   const mid = median(xs);
   return { median: mid, mad: median(xs.map(x => Math.abs(x - mid))), min: Math.min(...xs), max: Math.max(...xs) };
 };
+const guard = Bun.spawnSync([resolve(import.meta.dir, "../perf/screen-guard.sh")], { stderr: "inherit" });
+if (guard.exitCode !== 0) process.exit(1);
 try {
-  const child = Bun.spawn(["caffeinate", "-du", binary], {
+  // -i keeps the Mac from idle-sleeping mid-run; never -d/-u, which wake the display.
+  const child = Bun.spawn(["caffeinate", "-i", binary], {
     env: { ...process.env, SCRAWL_BENCH_START: root, SCRAWL_BENCH_QUICK_STOP: quickStop ? "1" : "0" }, stdout: "pipe", stderr: "pipe",
   });
   const timeout = setTimeout(() => child.kill(), 120_000);

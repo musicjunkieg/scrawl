@@ -11,7 +11,7 @@ use crate::model::{
     CaptureMode, CursorSample, DeviceInfo, InteractionEvent, Mark, RgbaFrame, ScrawlBundle, Shape,
     Stroke, TargetInfo, TranscriptData, WindowSnapshot, keyframe_budget,
 };
-use crate::render::render_contact_sheet;
+use crate::render::render_contact_sheet_for_duration;
 use crate::sketch::{marks_of, summary_markdown_with};
 use crate::{autocrop, model, render};
 
@@ -106,7 +106,6 @@ pub fn prepare_visuals(
     events: &[InteractionEvent],
     windows: &[WindowSnapshot],
     cursor: &[CursorSample],
-    agent_context: bool,
 ) -> Option<PreparedVisuals> {
     if selected.is_empty() {
         return None;
@@ -122,7 +121,6 @@ pub fn prepare_visuals(
         events,
         windows,
         cursor,
-        agent_context,
     );
     let keyframes: Vec<model::Keyframe> =
         annotated_frames.iter().map(|(kf, _)| kf.clone()).collect();
@@ -459,7 +457,6 @@ fn build_files(
                 &events,
                 &extras.windows,
                 &extras.cursor,
-                options.agent_context,
             );
             let keyframes = annotated.iter().map(|(kf, _)| kf.clone()).collect();
             let annotated_at = crate::clock::Instant::now();
@@ -507,11 +504,11 @@ fn build_files(
         } => {
             let (full_sheet, contact_sheet) = crate::par::join(
                 || {
-                    cropped
-                        .as_ref()
-                        .map(|(_, full)| render_contact_sheet(&bundle, full))
+                    cropped.as_ref().map(|(_, full)| {
+                        render_contact_sheet_for_duration(bundle.duration_ms, full)
+                    })
                 },
-                || render_contact_sheet(&bundle, &annotated),
+                || render_contact_sheet_for_duration(bundle.duration_ms, &annotated),
             );
             let full_sheet = full_sheet.unwrap();
             render::stamp_keyframe_badges(&mut annotated);

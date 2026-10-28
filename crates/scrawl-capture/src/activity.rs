@@ -326,22 +326,23 @@ pub fn system_prompt_at(raw: &[RawWindow], x: f64, y: f64) -> bool {
     })
 }
 
-/// Whether the topmost window under a global point (in `raw`, front to back) belongs to `own_pid`,
-/// looking through `passthrough` windows, which let clicks fall to whatever is below them.
+/// Whether the topmost window under a global point (in `raw`, front to back) belongs to a process
+/// `ours` accepts, looking through `passthrough` windows, which let clicks fall to whatever is
+/// below them.
 pub fn owned_window_at(
     raw: &[RawWindow],
     x: f64,
     y: f64,
-    own_pid: i32,
     passthrough: &[u32],
+    ours: impl Fn(i32) -> bool,
 ) -> bool {
     raw.iter()
         .filter(|w| {
             let [wx, wy, ww, wh] = w.bounds;
             w.alpha > 0.01 && x >= wx && x <= wx + ww && y >= wy && y <= wy + wh
         })
-        .find(|w| !(w.pid == own_pid && passthrough.contains(&w.id)))
-        .is_some_and(|w| w.pid == own_pid)
+        .find(|w| !passthrough.contains(&w.id))
+        .is_some_and(|w| ours(w.pid))
 }
 
 #[cfg(test)]
@@ -418,25 +419,26 @@ mod tests {
             alpha: 1.0,
         };
         let own = 7;
+        let ours = |pid| pid == own;
         let raw = [
             window(1, own, [0.0, 0.0, 1728.0, 1117.0]), // the ink overlay, click-through
             window(2, own, [700.0, 6.0, 320.0, 44.0]),  // the recording control
             window(3, 99, [100.0, 30.0, 1200.0, 900.0]), // an app
         ];
         assert!(
-            owned_window_at(&raw, 800.0, 20.0, own, &[1]),
+            owned_window_at(&raw, 800.0, 20.0, &[1], ours),
             "the stop button"
         );
         assert!(
-            !owned_window_at(&raw, 400.0, 500.0, own, &[1]),
+            !owned_window_at(&raw, 400.0, 500.0, &[1], ours),
             "the app under the overlay"
         );
         assert!(
-            !owned_window_at(&raw, 1500.0, 1000.0, own, &[1]),
+            !owned_window_at(&raw, 1500.0, 1000.0, &[1], ours),
             "the desktop"
         );
         assert!(
-            owned_window_at(&raw, 400.0, 500.0, own, &[]),
+            owned_window_at(&raw, 400.0, 500.0, &[], ours),
             "an overlay that takes clicks"
         );
     }
