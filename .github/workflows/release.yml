@@ -21,18 +21,33 @@ on:
         type: boolean
         default: true
 
+permissions:
+  contents: read
+
 jobs:
   check:
     name: Version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: The version matches Cargo.toml and package.json
+      - name: Released from main, at the version every manifest says
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          npm_version=$(node -p 'require("./packages/scrawl-web/package.json").version')
-          if [ "$cargo_version" != "${{ inputs.version }}" ] || [ "$npm_version" != "${{ inputs.version }}" ]; then
-            echo "::error::Asked for ${{ inputs.version }}, but Cargo.toml says $cargo_version and package.json says $npm_version"
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Releases run from main (the merged commit), not $GITHUB_REF"
+            exit 1
+          fi
+          wrong=""
+          for manifest in Cargo.toml crates/scrawl-bundle/Cargo.toml crates/scrawl-capture/Cargo.toml \
+            crates/scrawl-core/Cargo.toml crates/scrawl-route/Cargo.toml crates/scrawl-wasm/Cargo.toml; do
+            found=$(sed -n 's/^version = "\(.*\)"/\1/p' "$manifest" | head -1)
+            [ "$found" = "$VERSION" ] || wrong="$wrong $manifest ($found)"
+          done
+          found=$(node -p 'require("./packages/scrawl-web/package.json").version')
+          [ "$found" = "$VERSION" ] || wrong="$wrong packages/scrawl-web/package.json ($found)"
+          if [ -n "$wrong" ]; then
+            echo "::error::Asked for $VERSION, but these say otherwise:$wrong"
             exit 1
           fi
 
@@ -57,20 +72,22 @@ jobs:
           echo "checksum=$(swift package compute-checksum ScrawlCore.xcframework.zip)" >> "$GITHUB_OUTPUT"
       # A tag Swift Package Manager doesn't read as a version: the package's own version tag comes
       # after Package.swift names this zip (docs/releasing.md).
-      - name: GitHub Release scrawlcore-${{ inputs.version }}
+      - name: GitHub Release scrawlcore-<version>
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          CHECKSUM: ${{ steps.zip.outputs.checksum }}
         run: |
-          gh release create "scrawlcore-${{ inputs.version }}" ScrawlCore.xcframework.zip \
+          gh release create "scrawlcore-$VERSION" ScrawlCore.xcframework.zip \
             --target "$GITHUB_SHA" \
-            --title "ScrawlCore ${{ inputs.version }}" \
+            --title "ScrawlCore $VERSION" \
             --notes "ScrawlKit's bundle compiler (crates/scrawl-ffi) for iOS, the iOS simulator and macOS.
 
           Package.swift:
-          url: https://github.com/${{ github.repository }}/releases/download/scrawlcore-${{ inputs.version }}/ScrawlCore.xcframework.zip
-          checksum: ${{ steps.zip.outputs.checksum }}"
-          echo "### ScrawlCore ${{ inputs.version }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "checksum: \`${{ steps.zip.outputs.checksum }}\`" >> "$GITHUB_STEP_SUMMARY"
+          url: https://github.com/$GITHUB_REPOSITORY/releases/download/scrawlcore-$VERSION/ScrawlCore.xcframework.zip
+          checksum: $CHECKSUM"
+          echo "### ScrawlCore $VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "checksum: \`$CHECKSUM\`" >> "$GITHUB_STEP_SUMMARY"
 
   crates:
     name: crates.io

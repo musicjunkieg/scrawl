@@ -26,8 +26,8 @@ crates.io and npm each need a token saved in the repository as a secret. GitHub 
 
 ## Each release
 
-1. Check that every version says the release's number: the `version` in `Cargo.toml` and in each `crates/*/Cargo.toml` (and in their `scrawl-*` path dependencies), and in `packages/scrawl-web/package.json`. The workflow refuses to run if `Cargo.toml` or `package.json` disagree with what you type.
-2. On GitHub: Actions → Release → Run workflow. Type the version (`0.3.5`) and run it. It takes about 10 minutes.
+1. Check that every version says the release's number: the `version` in `Cargo.toml` and in each `crates/*/Cargo.toml` (and in their `scrawl-*` path dependencies), and in `packages/scrawl-web/package.json`. The workflow refuses to run if any of those (path dependencies aside) disagree with what you type, or if it isn't run from `main`.
+2. Merge the version change. On GitHub: Actions → Release → Run workflow, on `main`. Type the version (`0.3.5`) and run it. It takes about 10 minutes.
 3. The ScrawlCore job's summary and the new `scrawlcore-<version>` release both show a `checksum`. Put the release's URL and that checksum in `Package.swift`'s `coreRelease`, and merge that.
 4. Tag the merged commit `<version>` (Releases → Draft a new release → new tag `0.3.5` on `main`). That tag is the version Swift Package Manager installs.
 
