@@ -19,7 +19,7 @@ fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
     (a[0] - b[0]).hypot(a[1] - b[1])
 }
 
-#[cfg(test)]
+/// The shape one stroke reads as (a circle, an arrow, a line…).
 pub fn shape_of(stroke: &Stroke) -> Shape {
     ink_of(stroke).shape
 }
