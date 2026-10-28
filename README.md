@@ -396,8 +396,9 @@ Scrawl.event("Done tapped")              // optional: what the app did, on the t
 The host app needs `NSMicrophoneUsageDescription` in its Info.plist for narration (both capture
 methods use the microphone). Set `Scrawl.shared.narration = false` to record without it.
 
-To build bundles on the phone instead, with no Mac running Scrawl, link `ScrawlCore.xcframework`
-(`scripts/build-xcframework.sh`, then build with `SCRAWL_CORE=1`) and opt in:
+To build bundles on the phone instead, with no Mac running Scrawl, opt in. A released version of
+the package downloads `ScrawlCore.xcframework`, the compiler, from GitHub Releases on its own
+(`docs/releasing.md`); from a checkout, build it with `scripts/build-xcframework.sh`.
 
 ```swift
 Scrawl.shared.compiles = .onDevice
