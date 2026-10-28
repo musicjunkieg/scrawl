@@ -236,8 +236,8 @@
         guard self.recorder === recorder else { return }
         // The window may have moved while the microphone prompt was up.
         windowMoved()
-        capturedArea = area
-        let source = MacGeometry.sourceRect(of: area, on: display)
+        capturedArea = self.area
+        let source = MacGeometry.sourceRect(of: self.area, on: display)
         // Nothing in a few seconds (a window that never draws, a stuck capture): give up.
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
           MainActor.assumeIsolated {

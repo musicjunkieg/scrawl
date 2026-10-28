@@ -51,6 +51,7 @@
       firstFrame: @escaping @Sendable (Double) -> Void
     ) async throws {
       let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+      if queue.sync(execute: { cancelled }) { throw CancellationError() }
       guard let display = content.displays.first(where: { $0.displayID == area.displayID }) else {
         throw Failure(description: "The window's display can't be recorded")
       }
@@ -128,6 +129,8 @@
       // Cancelled while ScreenCaptureKit was starting: `cancel` found nothing running to stop.
       if queue.sync(execute: { cancelled }) {
         try? await stream.stopCapture()
+        queue.sync { if writer.status == .writing { writer.cancelWriting() } }
+        try? FileManager.default.removeItem(at: movie)
         throw CancellationError()
       }
     }
