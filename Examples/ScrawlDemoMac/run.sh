@@ -5,11 +5,13 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 cd "$here"
 swift build
+# A demo still running would keep the old build.
+pkill -x ScrawlDemoMac 2>/dev/null && sleep 1 || true
 app="$here/.build/ScrawlDemo.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS"
 cp "$(swift build --show-bin-path)/ScrawlDemoMac" "$app/Contents/MacOS/"
 cp Info.plist "$app/Contents/"
 codesign --force --sign - "$app"
-open "$app"
+open -n "$app"
 echo "Opened $app"

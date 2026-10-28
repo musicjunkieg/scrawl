@@ -31,8 +31,8 @@ default once ScrawlCore is built).
    run it again (macOS needs the restart), then press ⌃⌥⇧S again. Allow the microphone. Say "this
    button should say Save", click the counter, then press ⌃⌥⇧S again. The bar at the bottom says
    "Building the bundle…", macOS asks for speech recognition once, and the bundle shows in the
-   window's list. **Open summary** should have your words, the click on "Clicked 1 times" and
-   "Counter clicked (1)".
+   window's list. **Open summary** should have your words, the click on "Clicked 0 times" (the label as the
+   click went down) and "Counter clicked (1)".
 2. **The Help menu.** Help › Record with Scrawl starts it too; the same item stops it. Help ›
    Mark This Moment adds a marker.
 3. **Ink.** Record again, hold ⇧ and drag a circle around the text field. The frames should

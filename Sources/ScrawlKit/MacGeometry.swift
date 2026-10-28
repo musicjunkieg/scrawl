@@ -27,9 +27,12 @@ enum MacGeometry {
     return (even(size.width), even(size.height))
   }
 
-  /// Where the recorded area goes when its window moves to `window`: the same size, at the
-  /// window's top-left corner.
-  static func moved(_ area: CGRect, to window: CGRect) -> CGRect {
-    CGRect(x: window.minX, y: window.maxY - area.height, width: area.width, height: area.height)
+  /// Where the recorded area goes when its window moves from `old` to `new` (global AppKit
+  /// points): along with the window, the same size, kept on the recorded `display`.
+  static func moved(_ area: CGRect, from old: CGRect, to new: CGRect, on display: CGRect) -> CGRect {
+    let moved = area.offsetBy(dx: new.minX - old.minX, dy: new.maxY - old.maxY)
+    let x = min(max(moved.minX, display.minX), display.maxX - moved.width)
+    let y = min(max(moved.minY, display.minY), display.maxY - moved.height)
+    return CGRect(x: x, y: y, width: moved.width, height: moved.height)
   }
 }

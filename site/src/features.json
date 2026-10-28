@@ -524,7 +524,7 @@
       "id": "scrawlkit-mac",
       "group": "iphone",
       "name": "ScrawlKit for Mac apps",
-      "says": "The Swift package records inside your own Mac app: its window with ScreenCaptureKit, narration, labelled clicks, ⇧ ink and app events, built into a bundle on the Mac.",
+      "says": "The Swift package records inside your own Mac app: its window with ScreenCaptureKit, narration, labelled clicks, ⇧ ink and app events; with ScrawlCore, built into a bundle on the Mac.",
       "status": "main",
       "platforms": ["mac"],
       "shortcuts": [{ "keys": "⌃⌥⇧S", "does": "Start or stop recording in an app with ScrawlKit" }],

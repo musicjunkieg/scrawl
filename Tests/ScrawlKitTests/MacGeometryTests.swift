@@ -39,10 +39,28 @@ struct MacGeometryTests {
     #expect(tiny.width == 2 && tiny.height == 2)
   }
 
-  @Test func aMovedWindowKeepsTheAreasSizeAtItsTopLeft() {
-    let area = CGRect(x: 100, y: 200, width: 800, height: 600)
+  @Test func aMovedWindowTakesItsAreaAlong() {
+    let window = CGRect(x: 100, y: 200, width: 800, height: 600)
+    let area = MacGeometry.area(of: window, on: main)
     // Moved and made taller: the area stays 800×600, hung from the new top edge.
-    let moved = MacGeometry.moved(area, to: CGRect(x: 300, y: 100, width: 900, height: 800))
+    let moved = MacGeometry.moved(area, from: window, to: CGRect(x: 300, y: 100, width: 900, height: 800), on: main)
     #expect(moved == CGRect(x: 300, y: 300, width: 800, height: 600))
+  }
+
+  @Test func aWindowHangingOffTheDisplayKeepsItsOffset() {
+    // Hanging 50 points off the left edge: the area starts 50 points into the window.
+    let window = CGRect(x: -50, y: 100, width: 400, height: 300)
+    let area = MacGeometry.area(of: window, on: main)
+    #expect(area == CGRect(x: 0, y: 100, width: 350, height: 300))
+    let moved = MacGeometry.moved(area, from: window, to: window.offsetBy(dx: 60, dy: 0), on: main)
+    #expect(moved == CGRect(x: 60, y: 100, width: 350, height: 300))
+  }
+
+  @Test func anAreaMovedOffTheDisplayStaysOnIt() {
+    let window = CGRect(x: 100, y: 200, width: 800, height: 600)
+    let area = MacGeometry.area(of: window, on: main)
+    // Dragged toward the display above: the area stops at the recorded display's top edge.
+    let moved = MacGeometry.moved(area, from: window, to: window.offsetBy(dx: 0, dy: 500), on: main)
+    #expect(moved == CGRect(x: 100, y: 382, width: 800, height: 600))
   }
 }
