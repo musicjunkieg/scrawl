@@ -38,6 +38,7 @@
     private var sessionStart: CMTime?
     private var firstFrame: (@Sendable (Double) -> Void)?
     private var audioWritten = false
+    private var cancelled = false
 
     init(movie: URL) {
       self.movie = movie
@@ -124,6 +125,27 @@
         writer.cancelWriting()
         throw error
       }
+      // Cancelled while ScreenCaptureKit was starting: `cancel` found nothing running to stop.
+      if queue.sync(execute: { cancelled }) {
+        try? await stream.stopCapture()
+        throw CancellationError()
+      }
+    }
+
+    /// Stops a recording that hasn't shown a frame yet and throws the movie away. A `start`
+    /// still in progress then throws `CancellationError`.
+    func cancel() {
+      let stream: SCStream? = queue.sync {
+        cancelled = true
+        firstFrame = nil
+        if writer?.status == .writing { writer?.cancelWriting() }
+        defer { self.stream = nil }
+        return self.stream
+      }
+      Task {
+        try? await stream?.stopCapture()
+        try? FileManager.default.removeItem(at: movie)
+      }
     }
 
     /// Moves the recorded rectangle (same size) when its window moves.
@@ -176,17 +198,21 @@
       guard buffer.isValid, let writer, writer.status == .writing else { return }
       switch type {
       case .screen:
-        guard Self.isComplete(buffer), let video else { return }
+        guard Self.isComplete(buffer), let video, video.isReadyForMoreMediaData else { return }
         let time = buffer.presentationTimeStamp
         if sessionStart == nil {
+          // The movie starts only once its first frame is in it.
           writer.startSession(atSourceTime: time)
+          guard video.append(buffer) else {
+            fail(writer.error ?? Failure(description: "The movie couldn't be written"), stream: stream)
+            return
+          }
           sessionStart = time
           firstFrame?(time.seconds)
           firstFrame = nil
+          return
         }
-        if video.isReadyForMoreMediaData {
-          video.append(buffer)
-        }
+        video.append(buffer)
       case .microphone:
         guard let sessionStart, let audio, audio.isReadyForMoreMediaData,
               buffer.presentationTimeStamp >= sessionStart
@@ -195,6 +221,15 @@
       default:
         break
       }
+    }
+
+    /// Gives up on a movie whose first frame couldn't be written.
+    private func fail(_ error: any Error, stream: SCStream) {
+      writer?.cancelWriting()
+      firstFrame = nil
+      self.stream = nil
+      stream.stopCapture { _ in }
+      onStop?(error)
     }
 
     /// A frame with new pixels (ScreenCaptureKit also sends idle and blank ones).

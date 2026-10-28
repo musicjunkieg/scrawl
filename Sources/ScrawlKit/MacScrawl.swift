@@ -123,12 +123,12 @@
     /// from.
     @ObservationIgnored private var startArea: CGRect = .zero
     @ObservationIgnored private var startWindowFrame: CGRect = .zero
+    /// The area the capture was last given.
+    @ObservationIgnored private var capturedArea: CGRect = .zero
     @ObservationIgnored private var scale: CGFloat = 1
     /// Host time (seconds) of the movie's first frame: the timeline's zero.
     @ObservationIgnored private var zero: Double?
     @ObservationIgnored private var startedAt: Date?
-    /// Stop (false) or discard (true) asked for while starting.
-    @ObservationIgnored private var pendingFinish: Bool?
     @ObservationIgnored private var markers: [Double] = []
     @ObservationIgnored private var events: [[String: Any]] = []
     @ObservationIgnored private var touches: [[String: Any]] = []
@@ -196,7 +196,6 @@
       scale = screen.backingScaleFactor
       zero = nil
       startedAt = nil
-      pendingFinish = nil
       markers = []
       events = []
       touches = []
@@ -223,12 +222,30 @@
       // Set before it starts: the first frame (and a stop right after it) can come before
       // `start` returns.
       self.recorder = recorder
-      let source = MacGeometry.sourceRect(of: area, on: screen.frame)
+      moveObserver = NotificationCenter.default.addObserver(
+        forName: NSWindow.didMoveNotification, object: window, queue: .main
+      ) { _ in
+        MainActor.assumeIsolated { Scrawl.shared.windowMoved() }
+      }
       let overlayID = overlay.windowID
       let scale = scale
       Task {
         var narrated = false
         if narration { narrated = await Self.microphoneAllowed() }
+        // Stopped while the microphone prompt was up.
+        guard self.recorder === recorder else { return }
+        // The window may have moved while the microphone prompt was up.
+        windowMoved()
+        capturedArea = area
+        let source = MacGeometry.sourceRect(of: area, on: display)
+        // Nothing in a few seconds (a window that never draws, a stuck capture): give up.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+          MainActor.assumeIsolated {
+            let scrawl = Scrawl.shared
+            guard scrawl.isStarting, scrawl.recorder === recorder else { return }
+            scrawl.cancelStart(showing: "Recording didn't start: no frame came from the window")
+          }
+        }
         do {
           try await recorder.start(
             area: .init(displayID: displayID, sourceRect: source, scale: scale),
@@ -238,11 +255,9 @@
             Task { @MainActor in Scrawl.shared.began(recorder, at: host) }
           }
         } catch {
-          print("Scrawl: recording didn't start: \(error.localizedDescription)")
           guard self.recorder === recorder else { return }
-          isStarting = false
-          self.recorder = nil
-          showBriefly(Self.startFailure(error))
+          print("Scrawl: recording didn't start: \(error.localizedDescription)")
+          cancelStart(showing: Self.startFailure(error))
         }
       }
     }
@@ -273,34 +288,45 @@
       isRecording = true
       ScrawlAppContext.shared.begin(at: startedAt)
       overlay?.show("● Recording · \(shortcut.symbols) sends · hold ⇧ to draw")
-      if let window {
-        moveObserver = NotificationCenter.default.addObserver(
-          forName: NSWindow.didMoveNotification, object: window, queue: .main
-        ) { _ in
-          MainActor.assumeIsolated { Scrawl.shared.windowMoved() }
-        }
-      }
-      if let discarding = pendingFinish {
-        pendingFinish = nil
-        finish(discarding: discarding)
+      // Catches a move made while the capture was starting.
+      windowMoved()
+    }
+
+    /// Keeps the recorded area, the overlay and (once recording) the capture on the window.
+    private func windowMoved() {
+      guard isRecording || isStarting, let window else { return }
+      area = MacGeometry.moved(startArea, from: startWindowFrame, to: window.frame, on: display)
+      overlay?.move(to: area)
+      if isRecording, area != capturedArea {
+        capturedArea = area
+        recorder?.move(to: MacGeometry.sourceRect(of: area, on: display))
       }
     }
 
-    private func windowMoved() {
-      guard isRecording, let window else { return }
-      area = MacGeometry.moved(startArea, from: startWindowFrame, to: window.frame, on: display)
-      overlay?.move(to: area)
-      recorder?.move(to: MacGeometry.sourceRect(of: area, on: display))
+    /// Ends a recording that hasn't shown a frame yet: there is nothing to save.
+    private func cancelStart(showing message: String?) {
+      guard isStarting, let recorder else { return }
+      isStarting = false
+      self.recorder = nil
+      stopFollowingWindow()
+      recorder.cancel()
+      if let message {
+        showBriefly(message)
+      } else {
+        overlay?.orderOut(nil)
+      }
+    }
+
+    private func stopFollowingWindow() {
+      if let moveObserver { NotificationCenter.default.removeObserver(moveObserver) }
+      moveObserver = nil
     }
 
     private func recorderStopped(_ recorder: MacScreenRecorder, _ error: any Error) {
       guard self.recorder === recorder, isRecording || isStarting else { return }
       print("Scrawl: recording stopped: \(error.localizedDescription)")
       guard isRecording else {
-        // It never showed a frame: nothing to save.
-        isStarting = false
-        self.recorder = nil
-        showBriefly(Self.startFailure(error))
+        cancelStart(showing: Self.startFailure(error))
         return
       }
       finish(discarding: false)
@@ -308,7 +334,8 @@
 
     private func finish(discarding: Bool) {
       if isStarting {
-        pendingFinish = discarding
+        // No frame yet, so nothing to send either way.
+        cancelStart(showing: discarding ? nil : "Stopped before anything was recorded")
         return
       }
       guard isRecording, let recorder, let zero, let startedAt else { return }
@@ -316,8 +343,7 @@
       isDrawing = false
       isFinishing = true
       self.recorder = nil
-      if let moveObserver { NotificationCenter.default.removeObserver(moveObserver) }
-      moveObserver = nil
+      stopFollowingWindow()
       endStroke(at: CACurrentMediaTime() - zero)
 
       let bundleInfo = Bundle.main.infoDictionary ?? [:]
@@ -369,9 +395,24 @@
           try data.write(to: timeline)
         } catch {
           print("Scrawl: the timeline couldn't be saved: \(error.localizedDescription)")
+          // Building here uses `data`; anything else needs the file.
+          if !buildsHere {
+            if revealsWhenDone { NSWorkspace.shared.activateFileViewerSelecting([recorder.movie]) }
+            showBriefly("The timeline couldn't be saved; the movie is kept")
+            return
+          }
         }
         await deliver(Recording(movie: recorder.movie, timeline: timeline), timeline: data, createdAt: startedAt)
       }
+    }
+
+    /// Whether a finished recording is built into a bundle in this app.
+    private var buildsHere: Bool {
+      #if SCRAWL_CORE
+        compiles == .onDevice
+      #else
+        false
+      #endif
     }
 
     private func deliver(_ recording: Recording, timeline: Data, createdAt: Date) async {
