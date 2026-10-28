@@ -55,6 +55,11 @@ jobs:
       - run: xcodebuild build -scheme ScrawlKit -destination 'generic/platform=iOS' -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
         env:
           SCRAWL_CORE: "1"
+      # The Mac demo (Examples/ScrawlDemoMac), with ScrawlKit for macOS and ScrawlCore.
+      - run: swift build
+        working-directory: Examples/ScrawlDemoMac
+        env:
+          SCRAWL_CORE: "1"
       # The demo app (Examples/ScrawlDemo.swiftpm), which picks ScrawlCore up from target/.
       - run: xcodebuild build -scheme ScrawlDemo -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
         working-directory: Examples/ScrawlDemo.swiftpm

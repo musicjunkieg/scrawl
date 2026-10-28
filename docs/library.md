@@ -123,7 +123,18 @@ Goal: ScrawlKit builds bundles on the iPhone, with no Mac running Scrawl. Decide
     - Not fixed: a late tap can lose its frame to earlier swipes that changed more (https://github.com/musicjunkieg/scrawl/issues/45).
 - **Releases:** `.github/workflows/release.yml`, run by hand, puts `ScrawlCore.xcframework` on GitHub Releases (`scrawlcore-<version>`), the five library crates on crates.io and `scrawl-web` on npm; `Package.swift` downloads the xcframework through `coreRelease` when it wasn't built locally. `docs/releasing.md` has the tokens and the steps.
 
-After 8 comes phase 9 (ScrawlKit macOS), as in **Phases** below.
+### Now: phase 9, ScrawlKit for macOS
+
+Goal: a Mac app embeds ScrawlKit as an iOS app does, and gets the same timeline and bundle.
+
+- **9a (this branch):** `Sources/ScrawlKit/Mac*.swift`, all `#if os(macOS)` but `MacGeometry`.
+  - `Scrawl` for macOS keeps the iOS names (`shared`, `.scrawl()`, `event`, `start`/`stop`/`toggle`/`discard`/`mark`, `narration`, `compiles`, `onBundle`, `experiments`, `directory`). Started by ⌃⌥⇧S (`shortcut`, a local key monitor) or Help › Record with Scrawl (`addsMenuItems`), with Mark and Discard beside it.
+  - `MacScreenRecorder`: ScreenCaptureKit, filtered to this app's windows less the overlay, cropped to the front window's area (`sourceRect`, which follows the window when it moves, keeping its size), with the microphone (`captureMicrophone`, macOS 15) into one MP4. The movie starts at its first frame, whose host time is the timeline's zero; `NSEvent.timestamp` is on the same clock.
+  - Clicks are touches (`down`/`move`/`up`, id per click) in the area's points from its top-left, labelled from the app's accessibility under the pointer. Holding ⇧ turns drags into strokes, drawn on `MacOverlay` (left out of the movie) and kept from the app.
+  - The timeline is the iOS one (`device: "Mac"`, `capture: "screenCaptureKit"`), so `scrawlkit.rs` builds it unchanged. With ScrawlCore it goes through `OnDeviceBuild`; without, the movie and timeline are left for `scrawl import`.
+  - `ScrawlContext.swift` (`Scrawl.screen`, `Scrawl.context`, `.scrawlScreen`, `.scrawlContext`) now builds on macOS too.
+  - `Examples/ScrawlDemoMac` (`run.sh` wraps it as an app with its Info.plist); CI builds it.
+- **Next:** sending to the Scrawl app on the same Mac (with the receiver), a strip like the phone's (Draw, Send, Discard buttons), and scroll events.
 
 ### Working notes
 

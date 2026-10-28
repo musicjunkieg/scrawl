@@ -423,6 +423,38 @@ offline with Apple's speech recognition, which needs `NSSpeechRecognitionUsageDe
 Info.plist; iOS asks once. Without the key, or if the person declines, the bundle has no transcript
 and `summary.md` says why. With `.onDevice`, ScrawlKit is active without pairing. `Scrawl.shared.experiments` names Scrawl experiments to try in those bundles, as the Mac app's `config.json` does (`"skipStillSwipes"`). `Examples/ScrawlDemo.swiftpm` is a small app set up this way, to try on an iPhone (its README has the steps).
 
+### ScrawlKit (macOS)
+
+The same package records inside your own Mac app (macOS 15+): the app's window, with narration,
+the clicks that drove it (each with the accessibility label of what was clicked), red ink, markers
+and app events on one clock.
+
+```swift
+import ScrawlKit
+
+WindowGroup { ContentView().scrawl() }   // ⌃⌥⇧S, or Help › Record with Scrawl, starts and stops
+Scrawl.event("Saved")                    // optional: what the app did, on the timeline
+```
+
+An AppKit app calls `Scrawl.shared.install()` once after launch instead. While recording, hold ⇧ and
+drag to draw; Help › Mark This Moment adds a marker and Help › Discard Scrawl Recording throws the
+recording away. `Scrawl.shared.shortcut` changes the key and `addsMenuItems = false` leaves the Help
+menu alone.
+
+It records with ScreenCaptureKit, so macOS asks once to let the app record the screen (System
+Settings › Privacy & Security › Screen & System Audio Recording, then the app restarts). Only the
+app's own windows are in the movie: another app's window over it stays out, and so does Scrawl's
+overlay. Narration needs `NSMicrophoneUsageDescription` in the Info.plist (and the audio-input
+entitlement in a sandboxed app).
+
+With ScrawlCore (built as for iOS), each recording becomes
+`Application Support/ScrawlKit/<bundle id>/<stamp>.scrawl`, transcribed offline when the Info.plist
+has `NSSpeechRecognitionUsageDescription`, and goes to `Scrawl.shared.onBundle` or the Finder.
+Without it, the movie and its timeline are shown in the Finder for `scrawl import`; sending them
+straight to the Scrawl app is next. `Scrawl.screen(_:)`, `Scrawl.context(_:_:)` and their view
+modifiers work as on iOS. `Examples/ScrawlDemoMac` is a small app to try it (its README has the
+steps).
+
 `Scrawl.shared.captureMethod` picks how the video is made:
 
 - **`.appFrames`** (default): ScrawlKit draws the app's own windows into an H.264 `.mp4` at 30 fps
