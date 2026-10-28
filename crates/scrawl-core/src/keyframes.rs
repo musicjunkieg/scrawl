@@ -173,6 +173,15 @@ const GROUP_STROKES: usize = 12;
 const COVERAGE_WORDS: f32 = 100.0;
 const COVERAGE_MS: f32 = 35_000.0;
 
+/// What changes how keyframes are chosen, beyond the capture itself.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Selection<'a> {
+    /// The start times (ms) of swipes and drags the app says moved nothing (ScrawlKit: a scroll
+    /// view that came back to rest where it started), which cut no keyframe. Filled only with the
+    /// `skipStillSwipes` experiment on.
+    pub still_swipes: &'a [u64],
+}
+
 /// Marks in drawing order, grouped while they were drawn on the same screen with no click or drag
 /// (`actions`, sorted times) between them; then neighbouring groups merge until they fit `budget`,
 /// same-screen pairs with the least ink first, else the most alike. Flags stay on their own.
@@ -450,6 +459,27 @@ pub fn select_keyframes(
     transcript: &TranscriptData,
     max_keyframes: usize,
 ) -> Vec<(Keyframe, RgbaFrame)> {
+    select_keyframes_with(
+        frames,
+        strokes,
+        marks,
+        events,
+        transcript,
+        max_keyframes,
+        Selection::default(),
+    )
+}
+
+/// `select_keyframes`, told more by `selection`.
+pub fn select_keyframes_with(
+    frames: &[RgbaFrame],
+    strokes: &[Stroke],
+    marks: &mut [Mark],
+    events: &[InteractionEvent],
+    transcript: &TranscriptData,
+    max_keyframes: usize,
+    selection: Selection,
+) -> Vec<(Keyframe, RgbaFrame)> {
     for mark in marks.iter_mut() {
         mark.frame = None;
     }
@@ -506,6 +536,11 @@ pub fn select_keyframes(
         .map(|pair| scene_transition_diff(&pair[0], &pair[1]))
         .collect();
     for event in settled {
+        if let InteractionEvent::Drag { t, .. } = &event
+            && selection.still_swipes.contains(t)
+        {
+            continue;
+        }
         match &event {
             InteractionEvent::Click { t, x, y, .. }
             | InteractionEvent::Drag {
@@ -1011,6 +1046,43 @@ mod tests {
         let at: Vec<_> = selected.iter().map(|(k, _)| k.t).collect();
         assert_eq!(at, [20_000, 40_000]);
         assert!(marks.iter().all(|m| m.frame.is_some()));
+    }
+
+    #[test]
+    fn swipes_that_moved_nothing_cut_no_keyframe() {
+        let swipe = |t: u64| InteractionEvent::Drag {
+            t,
+            t1: t + 300,
+            x0: 0.5,
+            y0: 0.9,
+            x1: 0.5,
+            y1: 0.5,
+            label: None,
+            button: Some("touch".into()),
+            path: Vec::new(),
+        };
+        let frames: Vec<_> = (0..20).map(|i| frame(i * 500, 128)).collect();
+        let events = [swipe(1_000), swipe(4_000), swipe(7_000)];
+        let pick = |still: &[u64]| {
+            select_keyframes_with(
+                &frames,
+                &[],
+                &mut [],
+                &events,
+                &TranscriptData::default(),
+                MAX_KEYFRAMES,
+                Selection {
+                    still_swipes: still,
+                },
+            )
+            .iter()
+            .map(|(k, _)| k.reason)
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(pick(&[]), vec![KeyframeReason::Click; 3]);
+        assert_eq!(pick(&[1_000, 7_000]), vec![KeyframeReason::Click]);
+        // With every swipe still, the screen still gets its one frame.
+        assert_eq!(pick(&[1_000, 4_000, 7_000]), vec![KeyframeReason::Initial]);
     }
 
     #[test]

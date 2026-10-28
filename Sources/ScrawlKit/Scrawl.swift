@@ -297,6 +297,9 @@
     /// Small sequential IDs per finger (1, 2, 3…), stable for a touch's lifetime.
     @ObservationIgnored private var touchIDs: [ObjectIdentifier: Int] = [:]
     @ObservationIgnored private var nextTouchID = 1
+    /// The scroll view under each touch as it went down, where its content was then, and where
+    /// the finger was: to tell a swipe that moved nothing (`settleSwipe`).
+    @ObservationIgnored private var swipeStarts: [Int: SwipeStart] = [:]
     /// Touches that may become a press-and-hold, by ID: where each went down.
     @ObservationIgnored private var holdStarts: [Int: CGPoint] = [:]
     /// Touches currently moving across the screen, plus the scroll views they touched.
@@ -390,6 +393,9 @@
     /// `directory`, with the movie and timeline inside. Without it, the share sheet offers the
     /// folder when `sharesWhenDone`.
     public var onBundle: (@MainActor (URL) -> Void)?
+    /// Scrawl's experiments to try in bundles built on the phone, by name, as the Mac app's
+    /// `experiments` in `config.json` (`"skipStillSwipes"`). Off unless named here.
+    public var experiments: Set<String> = []
     /// The phone is building a recording's bundle (the strip says "Building…").
     private(set) var isBuildingOnPhone = false
     /// Interrupted on-device builds were looked for this launch (`resumeInterruptedBuilds`).
@@ -739,6 +745,7 @@
       // Fingers already down (the three-finger trigger) are never drawn or logged: only touches
       // that begin after this point get an ID.
       touchIDs = [:]
+      swipeStarts = [:]
       nextTouchID = 1
       holdStarts = [:]
       draggingTouchIDs = []
@@ -1077,6 +1084,7 @@
       if phase == .moved {
         lastTouchMoveMediaTime = CACurrentMediaTime()
         draggingTouchIDs.insert(id)
+        swipeStarts[id]?.reach(touch.location(in: window))
         if holdStarts[id] == nil {
           guard let startedAt else { return }
           let t = Date().timeIntervalSince(startedAt)
@@ -1099,7 +1107,11 @@
       }
       let point = touch.location(in: window)
       if phase == .began {
-        trackScrollViews(from: touch.view ?? window.hitTest(point, with: nil))
+        let leaf = touch.view ?? window.hitTest(point, with: nil)
+        trackScrollViews(from: leaf)
+        swipeStarts[id] = Self.scrollView(above: leaf).map {
+          SwipeStart(scroll: WeakScrollView($0), offset: $0.contentOffset, point: point)
+        }
         if let label = Self.hitLabel(at: point, in: window) {
           touchLabels[id] = label
         } else {
@@ -1108,10 +1120,12 @@
       }
       let label = touchLabels[id]
       let ended = phase == .ended || phase == .cancelled
+      var swipeStart: SwipeStart?
       if ended {
         touchIDs[key] = nil
         touchLabels.removeValue(forKey: id)
-        draggingTouchIDs.remove(id)
+        if draggingTouchIDs.remove(id) != nil { swipeStart = swipeStarts[id] }
+        swipeStarts[id] = nil
       }
       guard let startedAt else { return }
       trackHold(id: id, at: point, phase: phase)
@@ -1136,6 +1150,51 @@
         entry["label"] = label
       }
       touchLog.append(entry)
+      if let swipeStart {
+        settleSwipe(id: id, entry: touchLog.count - 1, from: swipeStart, recording: startedAt)
+      }
+    }
+
+    /// The nearest scroll view at or above `view` that scrolls.
+    private static func scrollView(above view: UIView?) -> UIScrollView? {
+      var current = view
+      while let candidate = current {
+        if let scroll = candidate as? UIScrollView, scroll.isScrollEnabled { return scroll }
+        current = candidate.superview
+      }
+      return nil
+    }
+
+    /// Once the swipe's scroll view has come to rest (up to 3 s), marks the swipe's last sample
+    /// `still` when its content is back where it started: a list pulled and let go, or swiped past
+    /// its end, which changed nothing on screen. A swipe across the way it scrolls (a row's swipe
+    /// actions, a page) isn't marked, since its scroll view can't say.
+    private func settleSwipe(id: Int, entry index: Int, from start: SwipeStart, recording: Date) {
+      guard let scroll = start.scroll.value else { return }
+      // Under the tap slop (`touch_events`) it's a tap or a long press, not a swipe.
+      guard start.travel >= 12 else { return }
+      let (dx, dy) = (start.farthest.dx, start.farthest.dy)
+      let size = scroll.contentSize
+      let inset = scroll.adjustedContentInset
+      let scrollsDown = scroll.alwaysBounceVertical || size.height + inset.top + inset.bottom > scroll.bounds.height
+      let scrollsAcross = scroll.alwaysBounceHorizontal || size.width + inset.left + inset.right > scroll.bounds.width
+      guard dy >= dx ? scrollsDown : scrollsAcross else { return }
+      Task { [weak self, weak scroll] in
+        var last: CGPoint?
+        for _ in 0 ..< 30 {
+          try? await Task.sleep(for: .milliseconds(100))
+          guard let self, let scroll, self.startedAt == recording else { return }
+          let moving = scroll.isTracking || scroll.isDragging || scroll.isDecelerating
+          let offset = scroll.contentOffset
+          if !moving, offset == last {
+            let still = hypot(offset.x - start.offset.x, offset.y - start.offset.y) < 1
+            guard index < self.touchLog.count, self.touchLog[index]["id"] as? Int == id else { return }
+            self.touchLog[index]["still"] = still
+            return
+          }
+          last = offset
+        }
+      }
     }
 
     private func trackScrollViews(from leaf: UIView?) {
@@ -1356,6 +1415,7 @@
         let id = recording.movie.deletingPathExtension().lastPathComponent
         let createdAt = (try? Date(finished.recordedAt, strategy: .iso8601)) ?? Date()
         let directory = Self.directory
+        let experiments = self.experiments
         if !recovered { isBuildingOnPhone = true }
         // Leaving the app ends an app-frames recording and starts this; ask for time to finish.
         // A build longer than iOS allows fails and keeps the recording, with Share.
@@ -1365,7 +1425,7 @@
           do {
             return try await .success(OnDeviceBuild.build(
               movie: recording.movie, timeline: timeline, id: id, createdAt: createdAt,
-              transcript: transcript, into: directory
+              transcript: transcript, experiments: experiments, into: directory
             ))
           } catch {
             return .failure(error)
@@ -1694,6 +1754,22 @@
     func update(_ satisfied: Bool) -> Bool {
       defer { wasSatisfied = satisfied }
       return satisfied && wasSatisfied == false
+    }
+  }
+
+  /// Where a swipe began over a scroll view (`settleSwipe`), and how far the finger went each way.
+  private struct SwipeStart {
+    let scroll: WeakScrollView
+    let offset: CGPoint
+    let point: CGPoint
+    var farthest = CGVector.zero
+    var travel: CGFloat = 0
+
+    mutating func reach(_ to: CGPoint) {
+      let (dx, dy) = (to.x - point.x, to.y - point.y)
+      farthest.dx = max(farthest.dx, abs(dx))
+      farthest.dy = max(farthest.dy, abs(dy))
+      travel = max(travel, hypot(dx, dy))
     }
   }
 

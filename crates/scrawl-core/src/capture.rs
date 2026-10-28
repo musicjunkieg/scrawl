@@ -45,6 +45,9 @@ pub struct Capture {
     /// Moments flagged without ink (ms); each becomes a mark with keyframe priority.
     #[serde(default)]
     pub flags: Vec<u64>,
+    /// Swipes the app says moved nothing (start ms), from `Timeline::still_swipes`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub still_swipes: Vec<u64>,
     /// Where the capture came from (`"web"`, say).
     #[serde(default)]
     pub source: Option<String>,
@@ -67,6 +70,9 @@ pub struct Capture {
     /// The `agentContext` experiment: numbered marks and the extra context in `summary.md`.
     #[serde(default)]
     pub agent_context: bool,
+    /// The `skipStillSwipes` experiment: `still_swipes` cut no keyframe.
+    #[serde(default)]
+    pub skip_still_swipes: bool,
     /// What the page saw, in `sdk.js`'s shape at epoch ms (`page::Event`): the element and
     /// component under clicks and ⇧ marks, console errors, failed requests and video playback.
     /// They name the capture's clicks and strokes and add app events (`page::apply`).
@@ -104,6 +110,13 @@ pub fn keyframe_times(capture: &Capture, frames: &[RgbaFrame]) -> Result<Vec<u64
         &events,
         &capture.transcript,
         capture.duration_ms,
+        crate::keyframes::Selection {
+            still_swipes: if capture.skip_still_swipes {
+                &capture.still_swipes
+            } else {
+                &[]
+            },
+        },
     ))
 }
 
@@ -127,6 +140,7 @@ pub fn compile_with_full(
     let (events, strokes) = page_applied(&capture);
     let options = BuildOptions {
         agent_context: capture.agent_context,
+        skip_still_swipes: capture.skip_still_swipes,
         autocrop: None,
         created_at_ms: capture.created_at_ms,
         logger: None,
@@ -143,6 +157,7 @@ pub fn compile_with_full(
         context_changes: capture.context_changes,
         screens: capture.screens,
         flags: capture.flags,
+        still_swipes: capture.still_swipes,
         full_frames: full,
         ..SourceExtras::default()
     };

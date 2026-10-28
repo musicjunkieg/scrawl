@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::keyframes::select_keyframes;
+use crate::keyframes::{Selection, select_keyframes_with};
 use crate::model::{
     CaptureMode, CursorSample, DeviceInfo, InteractionEvent, Mark, RgbaFrame, ScrawlBundle, Shape,
     Stroke, TargetInfo, TranscriptData, WindowSnapshot, keyframe_budget,
@@ -22,6 +22,9 @@ pub struct BuildOptions {
     /// The `agentContext` experiment: numbered marks on shared frames and the extra context in
     /// `summary.md`.
     pub agent_context: bool,
+    /// The `skipStillSwipes` experiment: swipes the app says moved nothing
+    /// (`SourceExtras::still_swipes`) cut no keyframe.
+    pub skip_still_swipes: bool,
     /// Autocrop for Display captures that don't pass their own (`SourceExtras::autocrop`);
     /// `None` leaves them uncropped.
     pub autocrop: Option<autocrop::Settings>,
@@ -184,6 +187,9 @@ pub struct SourceExtras {
     pub cursor: Vec<CursorSample>,
     /// Time-only markers (ms); each becomes a `Flag` mark with keyframe priority.
     pub flags: Vec<u64>,
+    /// Swipes the app says moved nothing (start ms; `Timeline::still_swipes`), which
+    /// `BuildOptions::skip_still_swipes` keeps from cutting keyframes.
+    pub still_swipes: Vec<u64>,
     /// When the video starts on the bundle's clock (ms).
     pub video_offset_ms: u64,
     /// Screen-capture auto-crop: `None` follows the config, `Some(None)` is off.
@@ -333,15 +339,17 @@ pub fn keyframe_times(
     events: &[InteractionEvent],
     transcript: &TranscriptData,
     duration_ms: u64,
+    selection: Selection,
 ) -> Vec<u64> {
     let mut marks = marks_with_flags(strokes, flags);
-    select_keyframes(
+    select_keyframes_with(
         frames,
         strokes,
         &mut marks,
         events,
         transcript,
         keyframe_budget(duration_ms),
+        selection,
     )
     .into_iter()
     .map(|(kf, _)| kf.t)
@@ -370,13 +378,20 @@ fn build_files(
         .unwrap_or_else(crate::clock::Instant::now);
     let mut marks = marks_with_flags(&strokes, &extras.flags);
     let started = crate::clock::Instant::now();
-    let selected = select_keyframes(
+    let selected = select_keyframes_with(
         &frames,
         &strokes,
         &mut marks,
         &events,
         &transcript,
         keyframe_budget(duration_ms),
+        Selection {
+            still_swipes: if options.skip_still_swipes {
+                &extras.still_swipes
+            } else {
+                &[]
+            },
+        },
     );
     let select_only_at = crate::clock::Instant::now();
     // Visuals rendered while transcription ran are used when they were made for the same keyframes.

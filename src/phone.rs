@@ -420,6 +420,18 @@ pub struct MovieCapture {
     pub context: BTreeMap<String, String>,
     pub context_changes: Vec<ContextChange>,
     pub screens: Vec<ScreenSpan>,
+    /// Swipes the app says moved nothing (`Timeline::still_swipes`).
+    pub still_swipes: Vec<u64>,
+}
+
+/// The swipes a bundle's `timeline.json` says moved nothing (`Timeline::still_swipes`); none
+/// without one (a cabled mirror, or a ScrawlKit build from before it said).
+pub fn still_swipes_in(bundle: &Path) -> Vec<u64> {
+    std::fs::read(bundle.join("timeline.json"))
+        .ok()
+        .and_then(|json| serde_json::from_slice::<Timeline>(&json).ok())
+        .map(|timeline| timeline.still_swipes())
+        .unwrap_or_default()
 }
 
 /// Builds a bundle from a phone movie already inside `bundle_dir`: narration transcribed with
@@ -559,6 +571,7 @@ pub fn build_movie_bundle(
         context_changes: capture.context_changes,
         screens: capture.screens,
         flags: capture.flags,
+        still_swipes: capture.still_swipes,
         full_frames: (!already_full).then(|| -> crate::FullFrames {
             Box::new(move |times: &[u64]| -> Result<Vec<RgbaFrame>> {
                 helper::frames(&movie, FrameTimes::At(times), PHONE_FRAME_EDGE)
@@ -623,6 +636,7 @@ pub fn finalize_live_capture(
             context: BTreeMap::new(),
             context_changes: Vec::new(),
             screens: Vec::new(),
+            still_swipes: Vec::new(),
         },
     )?;
     // The native video is ~18 Mbps; re-encode it a minute from now (in the app).
@@ -730,6 +744,7 @@ pub fn import(
             context: capture.context,
             context_changes: capture.context_changes,
             screens: capture.screens,
+            still_swipes: capture.still_swipes,
         },
     )
 }
