@@ -63,4 +63,14 @@ struct MacGeometryTests {
     let moved = MacGeometry.moved(area, from: window, to: window.offsetBy(dx: 0, dy: 500), on: main)
     #expect(moved == CGRect(x: 100, y: 382, width: 800, height: 600))
   }
+
+  @Test func anAreaHeldAtTheEdgeComesBackWithItsWindow() {
+    let window = CGRect(x: 100, y: 200, width: 800, height: 600)
+    let area = MacGeometry.area(of: window, on: main)
+    // Off the left edge and back: measured from the start each time, the area returns.
+    let away = MacGeometry.moved(area, from: window, to: window.offsetBy(dx: -200, dy: 0), on: main)
+    #expect(away.minX == 0)
+    let back = MacGeometry.moved(area, from: window, to: window, on: main)
+    #expect(back == area)
+  }
 }

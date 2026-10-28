@@ -28,7 +28,9 @@ enum MacGeometry {
   }
 
   /// Where the recorded area goes when its window moves from `old` to `new` (global AppKit
-  /// points): along with the window, the same size, kept on the recorded `display`.
+  /// points): along with the window, the same size, kept on the recorded `display`. Pass the
+  /// area and window frame from the start of the recording, not a previous result, so an area
+  /// held at the display's edge comes back to its place when the window does.
   static func moved(_ area: CGRect, from old: CGRect, to new: CGRect, on display: CGRect) -> CGRect {
     let moved = area.offsetBy(dx: new.minX - old.minX, dy: new.maxY - old.maxY)
     let x = min(max(moved.minX, display.minX), display.maxX - moved.width)

@@ -119,8 +119,10 @@
     /// The recorded area, in global AppKit points, and the display frame it's measured on.
     @ObservationIgnored private var area: CGRect = .zero
     @ObservationIgnored private var display: CGRect = .zero
-    /// The recorded window's frame when the area was last placed.
-    @ObservationIgnored private var windowFrame: CGRect = .zero
+    /// The area and its window's frame when recording started: where every move is measured
+    /// from.
+    @ObservationIgnored private var startArea: CGRect = .zero
+    @ObservationIgnored private var startWindowFrame: CGRect = .zero
     @ObservationIgnored private var scale: CGFloat = 1
     /// Host time (seconds) of the movie's first frame: the timeline's zero.
     @ObservationIgnored private var zero: Double?
@@ -188,7 +190,8 @@
         .map { CGDirectDisplayID($0.uint32Value) } ?? CGMainDisplayID()
       self.window = window
       self.area = area
-      windowFrame = window.frame
+      startArea = area
+      startWindowFrame = window.frame
       display = screen.frame
       scale = screen.backingScaleFactor
       zero = nil
@@ -285,8 +288,7 @@
 
     private func windowMoved() {
       guard isRecording, let window else { return }
-      area = MacGeometry.moved(area, from: windowFrame, to: window.frame, on: display)
-      windowFrame = window.frame
+      area = MacGeometry.moved(startArea, from: startWindowFrame, to: window.frame, on: display)
       overlay?.move(to: area)
       recorder?.move(to: MacGeometry.sourceRect(of: area, on: display))
     }
