@@ -432,7 +432,12 @@ mod tests {
         let capture = timeline.capture(400, 800, 4_000);
         assert_eq!(capture.still_swipes, vec![1_000]);
         // The listed swipe is the event that starts then.
-        assert!(capture.events.iter().any(|e| matches!(e, InteractionEvent::Drag { t: 1_000, .. })));
+        assert!(
+            capture
+                .events
+                .iter()
+                .any(|e| matches!(e, InteractionEvent::Drag { t: 1_000, .. }))
+        );
     }
 
     #[test]
