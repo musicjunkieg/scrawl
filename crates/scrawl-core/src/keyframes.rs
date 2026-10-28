@@ -178,7 +178,7 @@ const COVERAGE_MS: f32 = 35_000.0;
 pub struct Selection<'a> {
     /// The start times (ms) of swipes and drags the app says moved nothing (ScrawlKit: a scroll
     /// view that came back to rest where it started), which cut no keyframe. Filled only with the
-    /// `stillSwipes` experiment on.
+    /// `skipStillSwipes` experiment on.
     pub still_swipes: &'a [u64],
 }
 

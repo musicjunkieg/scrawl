@@ -1171,6 +1171,8 @@
     /// actions, a page) isn't marked, since its scroll view can't say.
     private func settleSwipe(id: Int, entry index: Int, from start: SwipeStart, recording: Date) {
       guard let scroll = start.scroll.value else { return }
+      // Under the tap slop (`touch_events`) it's a tap or a long press, not a swipe.
+      guard start.travel >= 12 else { return }
       let (dx, dy) = (start.farthest.dx, start.farthest.dy)
       let size = scroll.contentSize
       let inset = scroll.adjustedContentInset
@@ -1761,10 +1763,13 @@
     let offset: CGPoint
     let point: CGPoint
     var farthest = CGVector.zero
+    var travel: CGFloat = 0
 
     mutating func reach(_ to: CGPoint) {
-      farthest.dx = max(farthest.dx, abs(to.x - point.x))
-      farthest.dy = max(farthest.dy, abs(to.y - point.y))
+      let (dx, dy) = (to.x - point.x, to.y - point.y)
+      farthest.dx = max(farthest.dx, abs(dx))
+      farthest.dy = max(farthest.dy, abs(dy))
+      travel = max(travel, hypot(dx, dy))
     }
   }
 
