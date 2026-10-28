@@ -1,0 +1,140 @@
+name: Release
+
+# Run by hand (Actions → Release → Run workflow). Each part can be turned off; see
+# docs/releasing.md for the tokens the crates and npm parts need.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release; must match Cargo.toml (e.g. 0.3.5)"
+        required: true
+      xcframework:
+        description: "ScrawlCore.xcframework to a GitHub Release"
+        type: boolean
+        default: true
+      crates:
+        description: "The library crates to crates.io"
+        type: boolean
+        default: true
+      npm:
+        description: "scrawl-web to npm"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Released from main, at the version every manifest says
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Releases run from main (the merged commit), not $GITHUB_REF"
+            exit 1
+          fi
+          wrong=""
+          for manifest in Cargo.toml crates/scrawl-bundle/Cargo.toml crates/scrawl-capture/Cargo.toml \
+            crates/scrawl-core/Cargo.toml crates/scrawl-route/Cargo.toml crates/scrawl-wasm/Cargo.toml; do
+            found=$(sed -n 's/^version = "\(.*\)"/\1/p' "$manifest" | head -1)
+            [ "$found" = "$VERSION" ] || wrong="$wrong $manifest ($found)"
+          done
+          found=$(node -p 'require("./packages/scrawl-web/package.json").version')
+          [ "$found" = "$VERSION" ] || wrong="$wrong packages/scrawl-web/package.json ($found)"
+          if [ -n "$wrong" ]; then
+            echo "::error::Asked for $VERSION, but these say otherwise:$wrong"
+            exit 1
+          fi
+
+  xcframework:
+    name: ScrawlCore.xcframework
+    needs: check
+    if: ${{ inputs.xcframework }}
+    runs-on: macos-26
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios,aarch64-apple-darwin,x86_64-apple-darwin
+      - run: scripts/build-xcframework.sh
+      - name: Zip and checksum
+        id: zip
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent target/ScrawlCore.xcframework ScrawlCore.xcframework.zip
+          echo "checksum=$(swift package compute-checksum ScrawlCore.xcframework.zip)" >> "$GITHUB_OUTPUT"
+      # A tag Swift Package Manager doesn't read as a version: the package's own version tag comes
+      # after Package.swift names this zip (docs/releasing.md).
+      - name: GitHub Release scrawlcore-<version>
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          CHECKSUM: ${{ steps.zip.outputs.checksum }}
+        run: |
+          gh release create "scrawlcore-$VERSION" ScrawlCore.xcframework.zip \
+            --target "$GITHUB_SHA" \
+            --title "ScrawlCore $VERSION" \
+            --notes "ScrawlKit's bundle compiler (crates/scrawl-ffi) for iOS, the iOS simulator and macOS.
+
+          Package.swift:
+          url: https://github.com/$GITHUB_REPOSITORY/releases/download/scrawlcore-$VERSION/ScrawlCore.xcframework.zip
+          checksum: $CHECKSUM"
+          echo "### ScrawlCore $VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "checksum: \`$CHECKSUM\`" >> "$GITHUB_STEP_SUMMARY"
+
+  crates:
+    name: crates.io
+    needs: check
+    if: ${{ inputs.crates }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish, in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "::error::Add a CARGO_REGISTRY_TOKEN secret first (docs/releasing.md)"
+            exit 1
+          fi
+          cargo publish --locked -p scrawl-bundle -p scrawl-capture -p scrawl-core -p scrawl-route -p scrawl-wasm
+
+  npm:
+    name: npm
+    needs: check
+    if: ${{ inputs.npm }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      # The CLI's version must match the `wasm-bindgen` in Cargo.lock.
+      - run: cargo install --locked wasm-bindgen-cli --version 0.2.129
+      - name: Publish scrawl-web
+        working-directory: packages/scrawl-web
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::Add an NPM_TOKEN secret first (docs/releasing.md)"
+            exit 1
+          fi
+          npm publish --provenance --access public

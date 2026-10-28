@@ -118,7 +118,10 @@ Goal: ScrawlKit builds bundles on the iPhone, with no Mac running Scrawl. Decide
     - taps made while Draw was on were saved as one-point strokes, drawn as stray dots; ink that never moves 6 pt is dropped;
     - `summary.md` named the bundle by its path on the phone (`/var/mobile/…`);
     - SwiftUI buttons gave taps no label, since `hitLabel` looked for `UILabel`s; it now also reads the accessibility elements under the touch.
-    - Not fixed yet: a swipe over a screen that didn't move still cuts a keyframe (six near-identical frames in the 2-minute run), a candidate for an experiment.
+    - A swipe over a screen that didn't move cut a keyframe (six near-identical frames in the 2-minute run): the `skipStillSwipes` experiment (#44) has ScrawlKit say which swipes left their list where it was, since the pixels alone couldn't tell.
+
+    - Not fixed: a late tap can lose its frame to earlier swipes that changed more (https://github.com/musicjunkieg/scrawl/issues/45).
+- **Releases:** `.github/workflows/release.yml`, run by hand, puts `ScrawlCore.xcframework` on GitHub Releases (`scrawlcore-<version>`), the five library crates on crates.io and `scrawl-web` on npm; `Package.swift` downloads the xcframework through `coreRelease` when it wasn't built locally. `docs/releasing.md` has the tokens and the steps.
 
 After 8 comes phase 9 (ScrawlKit macOS), as in **Phases** below.
 
