@@ -65,6 +65,8 @@ fn scene_transition_diff(a: &[f32; THUMB_PIXELS], b: &[f32; THUMB_PIXELS]) -> f3
 }
 
 const GRID: usize = 128;
+/// `scrolled_diff` compares each row in this many bands.
+const BANDS: usize = 16;
 
 /// Mean luma over a grid of up to `GRID`×`GRID` cells, so a thin line that appears changes its
 /// cell.
@@ -125,6 +127,49 @@ fn region_diff(a: &LumaGrid, b: &LumaGrid, rect: [f32; 4]) -> f32 {
     changed as f32 / total as f32
 }
 
+/// The share of cells that changed between `a` and `b` once `b` is moved up or down by the rows
+/// that match best (up to an eighth of the frame), counted where they overlap: a screen nudged
+/// by a scroll or a list springing back, with nothing new on it, scores near 0.
+fn scrolled_diff(a: &LumaGrid, b: &LumaGrid) -> f32 {
+    if (a.columns, a.rows) != (b.columns, b.rows) || a.cells.is_empty() {
+        return 1.0;
+    }
+    let a_rows = a.rows;
+    // Each row is averaged into a few wide bands, so text that lands half a cell lower after a
+    // scroll doesn't count as changed.
+    let band = (a.columns / BANDS).max(1);
+    let coarse = |g: &LumaGrid| -> Vec<f32> {
+        g.cells
+            .chunks(g.columns)
+            .flat_map(|row| {
+                row.chunks(band)
+                    .map(|c| c.iter().sum::<f32>() / c.len() as f32)
+            })
+            .collect()
+    };
+    let (a, b) = (coarse(a), coarse(b));
+    let rows = a_rows;
+    let columns = a.len() / rows.max(1);
+    let reach = (rows / 8) as isize;
+    (-reach..=reach)
+        .map(|shift| {
+            let overlap = (0..rows as isize)
+                .filter(|&y| (0..rows as isize).contains(&(y + shift)))
+                .map(|y| (y as usize, (y + shift) as usize));
+            let (mut changed, mut total) = (0, 0);
+            for (ya, yb) in overlap {
+                for x in 0..columns {
+                    total += 1;
+                    if (a[ya * columns + x] - b[yb * columns + x]).abs() > CELL_CHANGE {
+                        changed += 1;
+                    }
+                }
+            }
+            changed as f32 / total.max(1) as f32
+        })
+        .fold(1.0, f32::min)
+}
+
 #[cfg(test)]
 pub fn luma_diff(a: &RgbaFrame, b: &RgbaFrame) -> f32 {
     thumbnail_diff(&luma_thumbnail(a), &luma_thumbnail(b))
@@ -132,6 +177,9 @@ pub fn luma_diff(a: &RgbaFrame, b: &RgbaFrame) -> f32 {
 
 struct Candidate {
     frame: usize,
+    /// A tap, click, swipe or drag, which `stillActions` keeps only when the screen it leaves is
+    /// new.
+    action: bool,
     span: (u64, u64),
     score: f32,
     reason: KeyframeReason,
@@ -159,6 +207,10 @@ fn nearest_frame(frames: &[&RgbaFrame], t: u64) -> usize {
 const CLAUSE_GAP_MS: u64 = 1_500;
 /// A spoken cue only cuts a keyframe if its image differs from every keyframe already chosen.
 const CUE_NOVELTY: f32 = 0.03;
+/// With `stillActions`, an action's frame is the first after it that differs from the next by less
+/// than this, at most `SETTLE_MS` after the swipe ends.
+const SETTLED: f32 = 0.03;
+const SETTLE_MS: u64 = 2_000;
 /// Marks share a keyframe while the screen around their ink (`INK_CONTEXT` beyond it, as a
 /// fraction of the frame) differs from the latest one's by less than this.
 const SAME_SCREEN: f32 = 0.05;
@@ -172,6 +224,16 @@ const GROUP_STROKES: usize = 12;
 /// inside the stretch is added if the screen changed there.
 const COVERAGE_WORDS: f32 = 100.0;
 const COVERAGE_MS: f32 = 35_000.0;
+
+/// Which experiments change how keyframes are chosen.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Selection {
+    /// The `stillActions` experiment: a tap, click, swipe or drag is shown once the screen has come
+    /// to rest after it, and only cuts a keyframe when that screen differs from every keyframe
+    /// already chosen (`CUE_NOVELTY`, as for a spoken cue). Tapping and swiping around a screen
+    /// that doesn't change yields one frame, not one per action.
+    pub still_actions: bool,
+}
 
 /// Marks in drawing order, grouped while they were drawn on the same screen with no click or drag
 /// (`actions`, sorted times) between them; then neighbouring groups merge until they fit `budget`,
@@ -450,6 +512,27 @@ pub fn select_keyframes(
     transcript: &TranscriptData,
     max_keyframes: usize,
 ) -> Vec<(Keyframe, RgbaFrame)> {
+    select_keyframes_with(
+        frames,
+        strokes,
+        marks,
+        events,
+        transcript,
+        max_keyframes,
+        Selection::default(),
+    )
+}
+
+/// `select_keyframes` with experiments (`Selection`).
+pub fn select_keyframes_with(
+    frames: &[RgbaFrame],
+    strokes: &[Stroke],
+    marks: &mut [Mark],
+    events: &[InteractionEvent],
+    transcript: &TranscriptData,
+    max_keyframes: usize,
+    selection: Selection,
+) -> Vec<(Keyframe, RgbaFrame)> {
     for mark in marks.iter_mut() {
         mark.frame = None;
     }
@@ -488,6 +571,7 @@ pub fn select_keyframes(
             let (first, last) = (&marks[group[0]], &marks[*group.last().unwrap()]);
             Candidate {
                 frame: nearest_frame(&frames, last.t1),
+                action: false,
                 span: (first.t0, last.t1),
                 score: 100.0,
                 reason: KeyframeReason::Mark,
@@ -521,11 +605,22 @@ pub fn select_keyframes(
                 // A short delay captures the result of the action rather than the
                 // mouse-down state. Prefer an actual post-action frame when present.
                 let first_after = frames.partition_point(|frame| frame.t_ms < end);
-                let after = nearest_frame(&frames, end.saturating_add(250))
+                let mut after = nearest_frame(&frames, end.saturating_add(250))
                     .max(first_after.min(frames.len() - 1));
+                // An action can set the screen moving (a scroll coasting, a list springing back,
+                // a screen sliding in), so `stillActions` takes the frame once it has come to rest.
+                if selection.still_actions {
+                    while after + 1 < frames.len()
+                        && deltas[after] >= SETTLED
+                        && frames[after + 1].t_ms <= end.saturating_add(SETTLE_MS)
+                    {
+                        after += 1;
+                    }
+                }
                 let delta = thumbnail_diff(&thumbnails[before], &thumbnails[after]);
                 candidates.push(Candidate {
                     frame: after,
+                    action: true,
                     span: (*t, end),
                     score: 60.0 + 30.0 * delta,
                     reason: KeyframeReason::Click,
@@ -536,6 +631,7 @@ pub fn select_keyframes(
             }
             InteractionEvent::Point { t, x, y, .. } => candidates.push(Candidate {
                 frame: nearest_frame(&frames, *t),
+                action: false,
                 span: (*t, *t),
                 score: 55.0,
                 reason: KeyframeReason::Laser,
@@ -558,6 +654,7 @@ pub fn select_keyframes(
             .unwrap_or_default();
         candidates.push(Candidate {
             frame: nearest_frame(&frames, stroke.t1),
+            action: false,
             span: (stroke.t0, stroke.t1),
             score: 55.0,
             reason: KeyframeReason::Laser,
@@ -626,6 +723,7 @@ pub fn select_keyframes(
             };
             candidates.push(Candidate {
                 frame,
+                action: false,
                 span: (word.t0, word.t0),
                 score,
                 reason: KeyframeReason::Speech,
@@ -640,6 +738,7 @@ pub fn select_keyframes(
         let t = frames[mid].t_ms;
         candidates.push(Candidate {
             frame: mid,
+            action: false,
             span: (t, t),
             score: 0.0,
             reason: KeyframeReason::Initial,
@@ -660,6 +759,15 @@ pub fn select_keyframes(
             .then_with(|| b.score.total_cmp(&a.score))
             .then_with(|| frames[a.frame].t_ms.cmp(&frames[b.frame].t_ms))
     });
+    // With `stillActions`, an action's screen is compared allowing for a scroll's nudge.
+    let grids: std::collections::HashMap<usize, LumaGrid> = if selection.still_actions {
+        candidates
+            .iter()
+            .map(|c| (c.frame, luma_grid(frames[c.frame])))
+            .collect()
+    } else {
+        Default::default()
+    };
     let admissible = |candidate: &Candidate, selected: &[Candidate]| {
         if !candidate.marks.is_empty() {
             return true;
@@ -672,13 +780,22 @@ pub fn select_keyframes(
         }) {
             return false;
         }
-        !matches!(
+        let must_be_new = matches!(
             candidate.reason,
             KeyframeReason::Speech | KeyframeReason::SceneChange
-        ) || selected.iter().all(|other| {
-            scene_transition_diff(&thumbnails[other.frame], &thumbnails[candidate.frame])
-                >= CUE_NOVELTY
-        })
+        );
+        if selection.still_actions && (must_be_new || candidate.action) {
+            return selected.iter().all(|other| {
+                scene_transition_diff(&thumbnails[other.frame], &thumbnails[candidate.frame])
+                    >= CUE_NOVELTY
+                    && scrolled_diff(&grids[&other.frame], &grids[&candidate.frame]) >= SAME_SCREEN
+            });
+        }
+        !must_be_new
+            || selected.iter().all(|other| {
+                scene_transition_diff(&thumbnails[other.frame], &thumbnails[candidate.frame])
+                    >= CUE_NOVELTY
+            })
     };
     let mut pending: Vec<Option<Candidate>> = candidates.into_iter().map(Some).collect();
     let mut selected: Vec<Candidate> = Vec::new();
@@ -890,6 +1007,7 @@ fn cover_long_stretches(
 fn scene_candidate(frame: usize, span: (u64, u64), diff: f32) -> Candidate {
     Candidate {
         frame,
+        action: false,
         span,
         score: 40.0 + 40.0 * diff,
         reason: KeyframeReason::SceneChange,

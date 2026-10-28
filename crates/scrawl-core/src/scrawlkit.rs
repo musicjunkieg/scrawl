@@ -371,6 +371,7 @@ impl Timeline {
             video: None,
             audio: None,
             agent_context: false,
+            still_actions: false,
             page: Vec::new(),
         }
     }

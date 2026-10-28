@@ -413,6 +413,10 @@ fn log_config_once(message: String) {
 /// and windows inline at their time, numbered marks on shared frames, where a screen changed.
 pub const AGENT_CONTEXT: &str = "agentContext";
 
+/// A click, tap, drag or swipe that leaves the screen as it was cuts no new keyframe
+/// (`keyframes::Selection::still_actions`).
+pub const STILL_ACTIONS: &str = "stillActions";
+
 /// Transcribe Mac recordings while they record, so finishing only waits for the last words
 /// (`live_transcribe`).
 pub const LIVE_TRANSCRIBE: &str = "liveTranscribe";
@@ -446,6 +450,7 @@ pub fn experiment(name: &str) -> bool {
 pub fn build_options() -> crate::BuildOptions {
     crate::BuildOptions {
         agent_context: experiment(AGENT_CONTEXT),
+        still_actions: experiment(STILL_ACTIONS),
         autocrop: autocrop_settings(),
         created_at_ms: crate::now_epoch_ms(),
         logger: Some(|message| crate::capture::scrawl_log(message)),

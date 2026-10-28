@@ -67,6 +67,10 @@ pub struct Capture {
     /// The `agentContext` experiment: numbered marks and the extra context in `summary.md`.
     #[serde(default)]
     pub agent_context: bool,
+    /// The `stillActions` experiment: taps and swipes that leave the screen as it was cut no new
+    /// keyframe.
+    #[serde(default)]
+    pub still_actions: bool,
     /// What the page saw, in `sdk.js`'s shape at epoch ms (`page::Event`): the element and
     /// component under clicks and ⇧ marks, console errors, failed requests and video playback.
     /// They name the capture's clicks and strokes and add app events (`page::apply`).
@@ -104,6 +108,9 @@ pub fn keyframe_times(capture: &Capture, frames: &[RgbaFrame]) -> Result<Vec<u64
         &events,
         &capture.transcript,
         capture.duration_ms,
+        crate::keyframes::Selection {
+            still_actions: capture.still_actions,
+        },
     ))
 }
 
@@ -127,6 +134,7 @@ pub fn compile_with_full(
     let (events, strokes) = page_applied(&capture);
     let options = BuildOptions {
         agent_context: capture.agent_context,
+        still_actions: capture.still_actions,
         autocrop: None,
         created_at_ms: capture.created_at_ms,
         logger: None,

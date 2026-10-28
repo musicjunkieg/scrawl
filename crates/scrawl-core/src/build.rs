@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::keyframes::select_keyframes;
+use crate::keyframes::{Selection, select_keyframes_with};
 use crate::model::{
     CaptureMode, CursorSample, DeviceInfo, InteractionEvent, Mark, RgbaFrame, ScrawlBundle, Shape,
     Stroke, TargetInfo, TranscriptData, WindowSnapshot, keyframe_budget,
@@ -22,6 +22,8 @@ pub struct BuildOptions {
     /// The `agentContext` experiment: numbered marks on shared frames and the extra context in
     /// `summary.md`.
     pub agent_context: bool,
+    /// The `stillActions` experiment (`keyframes::Selection::still_actions`).
+    pub still_actions: bool,
     /// Autocrop for Display captures that don't pass their own (`SourceExtras::autocrop`);
     /// `None` leaves them uncropped.
     pub autocrop: Option<autocrop::Settings>,
@@ -32,6 +34,13 @@ pub struct BuildOptions {
 }
 
 impl BuildOptions {
+    /// The experiments that change which keyframes are chosen.
+    pub fn selection(&self) -> Selection {
+        Selection {
+            still_actions: self.still_actions,
+        }
+    }
+
     fn log(&self, message: impl AsRef<str>) {
         if let Some(logger) = self.logger {
             logger(message.as_ref());
@@ -333,15 +342,17 @@ pub fn keyframe_times(
     events: &[InteractionEvent],
     transcript: &TranscriptData,
     duration_ms: u64,
+    selection: Selection,
 ) -> Vec<u64> {
     let mut marks = marks_with_flags(strokes, flags);
-    select_keyframes(
+    select_keyframes_with(
         frames,
         strokes,
         &mut marks,
         events,
         transcript,
         keyframe_budget(duration_ms),
+        selection,
     )
     .into_iter()
     .map(|(kf, _)| kf.t)
@@ -370,13 +381,14 @@ fn build_files(
         .unwrap_or_else(crate::clock::Instant::now);
     let mut marks = marks_with_flags(&strokes, &extras.flags);
     let started = crate::clock::Instant::now();
-    let selected = select_keyframes(
+    let selected = select_keyframes_with(
         &frames,
         &strokes,
         &mut marks,
         &events,
         &transcript,
         keyframe_budget(duration_ms),
+        options.selection(),
     );
     let select_only_at = crate::clock::Instant::now();
     // Visuals rendered while transcription ran are used when they were made for the same keyframes.
