@@ -3,24 +3,27 @@
 
 mod audio;
 // Windows looks elements up through UI Automation (`win/uia.rs`); other systems have no lookup.
+mod autocrop_lab;
 #[cfg_attr(
     not(any(target_os = "macos", target_os = "windows")),
     path = "ax_other.rs"
 )]
 mod ax;
-mod autocrop_lab;
 mod capture;
 #[cfg_attr(target_os = "windows", path = "win/command_line.rs")]
 mod command_line;
+mod command_transcriber;
 mod delivery;
 mod export;
+#[cfg(test)]
+mod feature_map;
 mod handoff;
 #[cfg_attr(target_os = "windows", path = "win/helper.rs")]
 mod helper;
 mod hex;
-mod hold;
 mod icons;
 mod inbox;
+mod ingest_http;
 #[cfg(target_os = "macos")]
 mod laser_overlay;
 mod live_transcribe;
@@ -29,11 +32,16 @@ mod native;
 mod onboarding;
 mod onboarding_window;
 mod phone;
+// Lowers the output volume while recording on macOS; elsewhere a no-op.
+#[cfg_attr(not(target_os = "macos"), path = "win/playback.rs")]
+mod playback;
+mod recover;
 mod retention;
 mod routing;
 mod screens;
 mod settings;
 mod settings_window;
+mod shortcut;
 #[cfg(target_os = "macos")]
 mod sparkle;
 mod speech_model;
@@ -76,13 +84,27 @@ struct Cli {
 }
 
 fn parse_engine(name: &str) -> Result<crate::transcribe::Engine, String> {
-    crate::transcribe::Engine::parse(name).ok_or_else(|| "expected `apple` or `hex`".to_owned())
+    crate::transcribe::Engine::parse(name)
+        .ok_or_else(|| "expected `apple`, `hex` or `command`".to_owned())
 }
 
 /// `scrawl hex status`: connection, models and what the next recording would use.
 fn hex_status() {
     let preferred = transcribe::Engine::configured();
     println!("Preferred transcriber: {}", preferred.name());
+    // Never runs the program; argv is not printed.
+    let command = handoff::transcribe_command();
+    if preferred == transcribe::Engine::Command {
+        match &command {
+            Ok(program) => println!("Command: {}", program.name()),
+            Err(unusable) => println!("Command: not usable ({unusable})"),
+        }
+    }
+    let next = |hex_model: Option<&str>| match (preferred, hex_model, &command) {
+        (transcribe::Engine::Command, _, Ok(program)) => format!("Command ({})", program.name()),
+        (transcribe::Engine::Hex, Some(model), _) => format!("Hex ({model})"),
+        _ => transcribe::LOCAL_ENGINE_TITLE.to_owned(),
+    };
     let configured = handoff::hex_model();
     println!(
         "Hex model setting: {}",
@@ -93,7 +115,7 @@ fn hex_status() {
         Ok(status) => status,
         Err(error) => {
             println!("Hex: not connected ({error:#})");
-            println!("Next recording uses: {}", transcribe::LOCAL_ENGINE_TITLE);
+            println!("Next recording uses: {}", next(None));
             return;
         }
     };
@@ -111,13 +133,7 @@ fn hex_status() {
         "Hex model in use: {}",
         chosen.as_deref().unwrap_or("none ready")
     );
-    println!(
-        "Next recording uses: {}",
-        match (preferred, chosen) {
-            (transcribe::Engine::Hex, Some(model)) => format!("Hex ({model})"),
-            _ => transcribe::LOCAL_ENGINE_TITLE.to_owned(),
-        }
-    );
+    println!("Next recording uses: {}", next(chosen.as_deref()));
 }
 
 #[derive(Subcommand)]
@@ -158,7 +174,7 @@ enum HexCommand {
 
 #[derive(Subcommand)]
 enum LabCommand {
-    /// Play a capsule scene: tap-then-area, tap-then-window, tap-then-screen, hold-switcher, finish.
+    /// Play a capsule scene: tap-then-area, tap-then-window, tap-then-screen, picker, finish.
     Pill {
         #[arg(value_enum)]
         scene: ui::LabScene,
@@ -245,7 +261,7 @@ enum Command {
         /// Copy the summary to the clipboard.
         #[arg(long)]
         clipboard: bool,
-        /// Transcribe with `apple` or `hex` instead of the configured transcriber.
+        /// Transcribe with `apple`, `hex` or `command` instead of the configured transcriber.
         #[arg(long, value_parser = parse_engine)]
         transcriber: Option<crate::transcribe::Engine>,
     },
@@ -283,13 +299,23 @@ enum Command {
         /// many times real time first, as if recording, so the finish only transcribes the tail.
         #[arg(long, hide = true, requires = "bench")]
         live_speed: Option<f64>,
-        /// Transcribe with `apple` or `hex` instead of the configured transcriber.
+        /// Transcribe with `apple`, `hex` or `command` instead of the configured transcriber.
         #[arg(long, value_parser = parse_engine)]
         transcriber: Option<crate::transcribe::Engine>,
         /// Turn an experiment on for this run, as `"experiments"` in `config.json` would
         /// (e.g. `agentContext`). Repeatable.
         #[arg(long = "experiment", value_name = "NAME")]
         experiments: Vec<String>,
+    },
+    /// Build the bundles whose build died with the app (no `scrawl.json`) in place, once each:
+    /// from their input log (`unfinished.json`) if they have one, else from `recording.mp4` and
+    /// `audio.wav` alone. The app runs it at launch.
+    Recover {
+        /// One bundle to build now, even if it was tried before.
+        bundle: Option<PathBuf>,
+        /// Captures folder (defaults to Scrawl's).
+        #[arg(long, conflicts_with = "bundle")]
+        captures: Option<PathBuf>,
     },
     /// Motion lab: replay the capsule's states on a fixed timeline with nothing captured, for
     /// traces (`--trace`, motion-lint's format), screen recordings and tuning.
@@ -320,9 +346,13 @@ enum Command {
         /// Path to `.scrawl` bundle directory, `scrawl.json`, or `latest`.
         #[arg(default_value = "latest")]
         bundle: PathBuf,
-        /// Emit raw `scrawl.json` instead of `summary.md`.
+        /// Emit raw `scrawl.json` instead of `summary.md` (with `--marks`, the marks as JSON).
         #[arg(long)]
         json: bool,
+        /// List the marks: keyframe, number as the summary shows it (✎②), time, shape, what it
+        /// was drawn on, and id, for `scrawl zoom --mark`.
+        #[arg(long)]
+        marks: bool,
         /// Turn an experiment on for this summary (e.g. `agentContext`). Repeatable.
         #[arg(long = "experiment", value_name = "NAME")]
         experiments: Vec<String>,
@@ -341,16 +371,24 @@ enum Command {
         #[arg(long, default_value_t = 4)]
         fps: u32,
     },
-    /// Zoom into one moment: a dense contact sheet of frames around a time or a spoken phrase,
-    /// with the bundle's ink and touches drawn in and each frame's time, plus what was said.
+    /// Zoom into one moment: a dense contact sheet of frames around a time, a spoken phrase or a
+    /// mark, with the bundle's ink and touches drawn in and each frame's time, plus what was said.
     Zoom {
         /// Path to `.scrawl` bundle directory or `latest`.
         #[arg(default_value = "latest")]
         bundle: PathBuf,
         /// The moment: a time (`0:12`, `12.5`) or a phrase from the narration ("width changes").
+        #[arg(long, required_unless_present = "mark", conflicts_with = "mark")]
+        at: Option<String>,
+        /// A mark, centred with its ink drawn: its number in the summary (`2` for ✎②) or its id
+        /// (`m2`). `scrawl inspect --marks` lists them.
         #[arg(long)]
-        at: String,
-        /// Seconds of video to cover (a quarter before the moment, the rest after).
+        mark: Option<String>,
+        /// The keyframe whose ✎① ✎② `--mark` counts (`--frame 2` for #2), when several have one.
+        #[arg(long, requires = "mark")]
+        frame: Option<usize>,
+        /// Seconds of video to cover (a quarter before the moment, the rest after; for a mark, at
+        /// least the whole mark, centred).
         #[arg(long, default_value_t = 2.0)]
         span: f64,
         /// Frames in the sheet.
@@ -591,7 +629,9 @@ pub fn run() -> Result<()> {
         // start a second menu-bar app. macOS opens the app with stdin on /dev/null.
         // On Windows `scrawl.exe` is a console program and Explorer gives it a console too, so a
         // bare launch always starts the app.
-        None if cfg!(target_os = "macos") && std::io::IsTerminal::is_terminal(&std::io::stdin()) => {
+        None if cfg!(target_os = "macos")
+            && std::io::IsTerminal::is_terminal(&std::io::stdin()) =>
+        {
             <Cli as clap::CommandFactory>::command().print_help()?;
             return Ok(());
         }
@@ -634,6 +674,7 @@ pub fn run() -> Result<()> {
                     .ok()
                     .and_then(|mut d| d.drain(..).next().map(|p| p.id))
             });
+            let playback = playback::Guard::start();
             let session = phone::PhoneSession::start(
                 &bundle_dir.join("recording.mov"),
                 dev_id.as_deref(),
@@ -651,6 +692,7 @@ pub fn run() -> Result<()> {
             while !session.has_ended() && record_started.elapsed() < target_dur {
                 std::thread::sleep(Duration::from_millis(50));
             }
+            drop(playback);
             let recording = session.stop()?;
             let (_dir, _bundle, summary) =
                 phone::finalize_live_capture(&bundle_dir, recording, Vec::new(), Vec::new(), note)?;
@@ -670,6 +712,7 @@ pub fn run() -> Result<()> {
             });
             std::fs::create_dir_all(&bundle_dir)?;
             let video_path = bundle_dir.join("recording.mp4");
+            let playback = playback::Guard::start();
             let audio = start_recorder().ok();
             let session = ScreenCaptureSession::start(
                 target.clone(),
@@ -684,6 +727,7 @@ pub fn run() -> Result<()> {
                 )
             });
             std::thread::sleep(Duration::from_secs(duration.max(1)));
+            drop(playback);
             let recording = session.stop();
             let activity = window_log
                 .map(windows::WindowLogger::stop)
@@ -769,19 +813,23 @@ pub fn run() -> Result<()> {
             if let Some(iters) = bench {
                 let iters = iters.max(1);
                 let video_name = video.file_name().context("Bad video name")?.to_owned();
+                let prep_iter = |i: u32| -> Result<(PathBuf, PathBuf)> {
+                    let iter_out = if i + 1 == iters {
+                        out.clone()
+                    } else {
+                        out.with_file_name(format!("bench-{i}.scrawl"))
+                    };
+                    let _ = std::fs::remove_dir_all(&iter_out);
+                    std::fs::create_dir_all(&iter_out)?;
+                    let linked = iter_out.join(&video_name);
+                    std::fs::hard_link(&video, &linked)
+                        .or_else(|_| std::fs::copy(&video, &linked).map(|_| ()))?;
+                    Ok((iter_out, linked))
+                };
                 let mut runs_ms = Vec::with_capacity(iters as usize);
                 if let Some(device) = old.device.clone() {
                     for i in 0..iters {
-                        let iter_out = if i + 1 == iters {
-                            out.clone()
-                        } else {
-                            out.with_file_name(format!("bench-{i}.scrawl"))
-                        };
-                        let _ = std::fs::remove_dir_all(&iter_out);
-                        std::fs::create_dir_all(&iter_out)?;
-                        let linked = iter_out.join(&video_name);
-                        std::fs::hard_link(&video, &linked)
-                            .or_else(|_| std::fs::copy(&video, &linked).map(|_| ()))?;
+                        let (iter_out, linked) = prep_iter(i)?;
                         let t0 = std::time::Instant::now();
                         phone::build_movie_bundle(
                             &iter_out,
@@ -836,16 +884,7 @@ pub fn run() -> Result<()> {
                         .map(std::fs::read)
                         .transpose()?;
                     for i in 0..iters {
-                        let iter_out = if i + 1 == iters {
-                            out.clone()
-                        } else {
-                            out.with_file_name(format!("bench-{i}.scrawl"))
-                        };
-                        let _ = std::fs::remove_dir_all(&iter_out);
-                        std::fs::create_dir_all(&iter_out)?;
-                        let linked = iter_out.join(&video_name);
-                        std::fs::hard_link(&video, &linked)
-                            .or_else(|_| std::fs::copy(&video, &linked).map(|_| ()))?;
+                        let (iter_out, linked) = prep_iter(i)?;
                         let iter_frames = candidates.clone();
                         let iter_strokes = old.strokes.clone();
                         let iter_events = old.events.clone();
@@ -936,69 +975,55 @@ pub fn run() -> Result<()> {
                 )?
                 .2
             } else {
-                let started_at = std::time::Instant::now();
-                let audio = old
+                if let Some(audio) = old
                     .audio
                     .as_ref()
                     .map(|a| dir.join(a))
-                    .filter(|p| p.is_file());
-                let recorded = match &audio {
-                    Some(path) => {
-                        std::fs::copy(path, out.join("audio.wav"))?;
-                        Some(audio::recorded_audio_from_wav(std::fs::read(path)?)?)
-                    }
-                    None => None,
-                };
-                let wav = out.join("audio.wav");
-                let offset = old.video_offset_ms;
-                let ((transcript, transcribe_ms), joined) = std::thread::scope(|scope| {
-                    let frames = scope.spawn(|| {
-                        let t0 = std::time::Instant::now();
-                        let res = helper::frames(&copied, helper::FrameTimes::Every(220), 640);
-                        (res, t0.elapsed().as_millis() as u64)
-                    });
-                    let t0 = std::time::Instant::now();
-                    let tr = transcribe::transcribe(
-                        recorded.as_ref().map(|_| wav.as_path()),
-                        recorded.as_ref(),
-                    );
-                    ((tr, t0.elapsed().as_millis() as u64), frames.join())
-                });
-                let (frames, candidates_ms) =
-                    joined.map_err(|_| anyhow::anyhow!("Frame decoding panicked"))?;
-                let mut frames = frames?;
-                for frame in &mut frames {
-                    frame.t_ms += offset;
+                    .filter(|p| p.is_file())
+                {
+                    std::fs::copy(audio, out.join("audio.wav"))?;
                 }
-                let full_frames = Some(movie_keyframes(copied.clone(), offset));
-                build_bundle_from_parts(
+                rebuild_screen_bundle(
                     &out,
-                    old.target,
-                    old.duration_ms,
-                    frames,
-                    old.strokes,
-                    old.events,
-                    transcript,
-                    Some(copied),
-                    old.note,
-                    SourceExtras {
+                    recover::Unfinished {
+                        target: old.target,
+                        duration_ms: old.duration_ms,
+                        video: copied
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned()),
+                        video_offset_ms: old.video_offset_ms,
+                        strokes: old.strokes,
+                        events: old.events,
+                        note: old.note,
                         windows: old.windows,
                         cursor: old.cursor,
-                        full_frames,
-                        video_offset_ms: offset,
-                        timings: StageTimings {
-                            started_at: Some(started_at),
-                            candidates_ms: Some(candidates_ms),
-                            transcribe_ms: Some(transcribe_ms),
-                            ..Default::default()
-                        },
-                        ..SourceExtras::default()
                     },
-                    &crate::handoff::build_options(),
                 )?
-                .2
             };
             print!("{summary}");
+            Ok(())
+        }
+        Command::Recover {
+            bundle: Some(bundle),
+            ..
+        } => {
+            print!("{}", recover::rebuild(&bundle, &recover::Media::SYSTEM)?);
+            Ok(())
+        }
+        Command::Recover {
+            bundle: None,
+            captures,
+        } => {
+            let captures = captures.unwrap_or_else(handoff::default_captures_dir);
+            let results = recover::run(&captures);
+            let failed = results.iter().filter(|(_, r)| r.is_err()).count();
+            for (dir, result) in results {
+                match result {
+                    Ok(_) => println!("rebuilt {}", dir.display()),
+                    Err(error) => println!("failed  {}: {error:#}", dir.display()),
+                }
+            }
+            ensure!(failed == 0, "{failed} bundle(s) could not be rebuilt");
             Ok(())
         }
         Command::Lab {
@@ -1075,7 +1100,8 @@ pub fn run() -> Result<()> {
             Ok(())
         }
         Command::SckProbe { watch } => {
-            let end = std::time::Instant::now() + std::time::Duration::from_secs(watch.unwrap_or(0));
+            let end =
+                std::time::Instant::now() + std::time::Duration::from_secs(watch.unwrap_or(0));
             loop {
                 let started = std::time::Instant::now();
                 let preflight = capture::screen_capture_granted();
@@ -1101,13 +1127,26 @@ pub fn run() -> Result<()> {
         Command::Inspect {
             bundle,
             json,
+            marks,
             experiments,
         } => {
             for name in &experiments {
                 handoff::enable_experiment(name);
             }
             let (dir, loaded) = handoff::load_bundle(&bundle)?;
-            if json {
+            if marks {
+                let entries = agent_context::mark_entries(&loaded);
+                if json {
+                    let list: Vec<_> = entries.iter().map(|e| e.json()).collect();
+                    println!("{}", serde_json::to_string_pretty(&list)?);
+                } else if entries.is_empty() {
+                    println!("No marks");
+                } else {
+                    for entry in &entries {
+                        println!("{}", entry.line());
+                    }
+                }
+            } else if json {
                 println!("{}", serde_json::to_string_pretty(&loaded)?);
             } else {
                 print!("{}", summary_markdown(&loaded, &dir));
@@ -1122,7 +1161,7 @@ pub fn run() -> Result<()> {
             let captures = captures.unwrap_or_else(handoff::default_captures_dir);
             let policy = retention::Policy::load();
             let ahead = Duration::from_secs_f64(days_ahead.max(0.0) * 86_400.0);
-            let (actions, report) = retention::run_pass(&captures, &policy, dry_run, ahead);
+            let (actions, report) = retention::run_pass(&captures, &policy, dry_run, ahead, true);
             for action in &actions {
                 let line = match action {
                     retention::Action::TrashMedia { bundle, .. } => {
@@ -1214,13 +1253,23 @@ pub fn run() -> Result<()> {
         Command::Zoom {
             bundle,
             at,
+            mark,
+            frame,
             span,
             frames,
             full,
         } => {
             let (dir, loaded) = handoff::load_bundle(&bundle)?;
             ensure!(span.is_finite() && span > 0.0, "--span must be positive");
-            let sheet = zoom::zoom(&dir, &loaded, &at, (span * 1_000.0) as u64, frames, !full)?;
+            let focus = if let Some(query) = &mark {
+                let entry =
+                    agent_context::find_mark(&loaded, query, frame).map_err(anyhow::Error::msg)?;
+                println!("{}", entry.line());
+                zoom::Focus::Mark(entry)
+            } else {
+                zoom::Focus::At(at.as_deref().context("Pass --at or --mark")?)
+            };
+            let sheet = zoom::zoom(&dir, &loaded, focus, (span * 1_000.0) as u64, frames, !full)?;
             println!("{}", sheet.path.display());
             println!(
                 "{} → {}, {} frames: {}",
@@ -1379,29 +1428,21 @@ pub fn run() -> Result<()> {
         Command::Route {
             url,
             browser,
-            explain: Some(bundle),
+            explain,
         } => {
-            let url = match browser {
-                Some(browser) => Some(
+            let url = match (url, browser) {
+                (Some(url), _) => Some(url),
+                (None, Some(browser)) => Some(
                     routing::browser_tab_url(&browser)
                         .with_context(|| format!("Couldn't read the front tab of {browser}"))?,
                 ),
-                None => url,
+                (None, None) => None,
             };
-            print!("{}", routing::explain_bundle(&bundle, url.as_deref())?);
-            Ok(())
-        }
-        Command::Route {
-            url,
-            browser,
-            explain: None,
-        } => {
-            let url = match (url, browser) {
-                (Some(url), _) => url,
-                (None, Some(browser)) => routing::browser_tab_url(&browser)
-                    .with_context(|| format!("Couldn't read the front tab of {browser}"))?,
-                (None, None) => anyhow::bail!("Pass --url or --browser"),
-            };
+            if let Some(bundle) = explain {
+                print!("{}", routing::explain_bundle(&bundle, url.as_deref())?);
+                return Ok(());
+            }
+            let url = url.context("Pass --url or --browser")?;
             match routing::route(&url, &routing::hooks()) {
                 Ok(dest) => println!("{}", serde_json::to_string_pretty(&dest)?),
                 Err(reason) => println!("{url}: clipboard only ({reason})"),

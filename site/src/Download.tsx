@@ -55,7 +55,7 @@ function SendLink() {
       className="btn-primary"
       onClick={async () => {
         if (canShare) {
-          await navigator.share({ title: "Scrawl", text: "Scrawl for Mac", url: SITE }).catch(() => {})
+          await navigator.share({ title: "Scrawl", text: "Scrawl for Mac and Windows", url: SITE }).catch(() => {})
           return
         }
         await navigator.clipboard?.writeText(SITE)
@@ -64,7 +64,7 @@ function SendLink() {
       }}
     >
       <Share />
-      {canShare ? "Send yourself the link" : copied ? "Link copied" : "Copy link for your Mac"}
+      {canShare ? "Send yourself the link" : copied ? "Link copied" : "Copy link for your computer"}
     </button>
   )
 }
@@ -105,11 +105,13 @@ function meta(platform: Platform): string {
     case "mac-intel":
       return `Needs a Mac with Apple silicon and macOS ${RELEASE.macos} or later.`
     case "windows":
-      return WINDOWS_DOWNLOAD ? "Windows x64" : "Scrawl is Mac-only today. Windows is on the way."
+      return WINDOWS_DOWNLOAD
+        ? `Preview ${RELEASE.version} · Windows 10 and 11, x64 · Not signed yet: if Windows warns, click More info, then Run anyway.`
+        : "Scrawl is Mac-only today. Windows is on the way."
     case "linux":
-      return "Scrawl is Mac-only today."
+      return WINDOWS_DOWNLOAD ? "Scrawl runs on Mac and Windows today." : "Scrawl is Mac-only today."
     case "mobile":
-      return "Scrawl runs on your Mac."
+      return WINDOWS_DOWNLOAD ? "Scrawl runs on your Mac or PC." : "Scrawl runs on your Mac."
   }
 }
 
@@ -141,7 +143,7 @@ export function Platforms({ brew }: { brew: boolean }) {
       <li>
         <div className="platform-row">
           <span className="platform-name">Windows</span>
-          <span className="platform-detail">x64</span>
+          <span className="platform-detail">{WINDOWS_DOWNLOAD ? "x64, preview, unsigned" : "x64"}</span>
           {WINDOWS_DOWNLOAD ? (
             <a className="platform-action" href={WINDOWS_DOWNLOAD}>
               Download

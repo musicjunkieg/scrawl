@@ -1720,8 +1720,7 @@ pub fn change_regions(prev: &RgbaFrame, cur: &RgbaFrame) -> Vec<Rect> {
 
 /// Keyframes ready to write: annotated, and cropped when the capture is a Screen capture and the
 /// crop is worth it. The second value is the info for `scrawl.json` and the full annotated
-/// frames (for `frames-full/`), present only when something was cropped. `agent_context` is the
-/// `agentContext` experiment (`render::annotate_keyframe_marks_in_place`).
+/// frames (for `frames-full/`), present only when something was cropped.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn annotate_and_crop(
     selected: Vec<(Keyframe, RgbaFrame)>,
@@ -1734,7 +1733,6 @@ pub fn annotate_and_crop(
     events: &[InteractionEvent],
     windows: &[WindowSnapshot],
     cursor: &[CursorSample],
-    agent_context: bool,
 ) -> (
     Vec<(Keyframe, RgbaFrame)>,
     Option<(crate::model::AutocropInfo, Vec<(Keyframe, RgbaFrame)>)>,
@@ -1782,14 +1780,7 @@ pub fn annotate_and_crop(
         });
     let Some((crops, changes)) = plan else {
         let frames = crate::par::map(selected, |(kf, mut frame)| {
-            annotate_keyframe_marks_in_place(
-                &mut frame,
-                &kf,
-                strokes,
-                marks,
-                events,
-                agent_context,
-            );
+            annotate_keyframe_marks_in_place(&mut frame, &kf, strokes, marks, events);
             (kf, frame)
         })
         .into_iter()
@@ -1804,14 +1795,7 @@ pub fn annotate_and_crop(
     let results: Vec<_> =
         crate::par::map(selected.into_iter().zip(&crops), |((kf, mut raw), crop)| {
             let out = if crop.kind == CropKind::Full {
-                annotate_keyframe_marks_in_place(
-                    &mut raw,
-                    &kf,
-                    strokes,
-                    marks,
-                    events,
-                    agent_context,
-                );
+                annotate_keyframe_marks_in_place(&mut raw, &kf, strokes, marks, events);
                 raw.clone()
             } else {
                 let mut out = crop_frame(&raw, crop.rect);
@@ -1822,16 +1806,8 @@ pub fn annotate_and_crop(
                     &view.strokes,
                     &view.marks,
                     &view.events,
-                    agent_context,
                 );
-                annotate_keyframe_marks_in_place(
-                    &mut raw,
-                    &kf,
-                    strokes,
-                    marks,
-                    events,
-                    agent_context,
-                );
+                annotate_keyframe_marks_in_place(&mut raw, &kf, strokes, marks, events);
                 out
             };
             let r = crop.rect.map(f64::from);
@@ -2156,7 +2132,6 @@ mod tests {
             &events,
             &windows,
             &[],
-            false,
         );
         let (info, full) = cropped.expect("cropped");
         assert_eq!((frames[0].1.width, frames[0].1.height), (600, 400));
@@ -2186,7 +2161,6 @@ mod tests {
                 &events,
                 &windows,
                 &[],
-                false,
             );
             assert!(cropped.is_none());
             assert_eq!(frames[0].1.width, 1728);

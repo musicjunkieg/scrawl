@@ -55,6 +55,8 @@ pub struct OpenCodeSessionLocation {
 pub struct OpenCodeSessionTime {
     #[serde(default)]
     pub updated: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewed: Option<u64>,
     #[serde(default)]
     pub archived: Option<u64>,
 }
@@ -114,8 +116,10 @@ pub fn find_root_session(
             .as_array()
             .or_else(|| response.get("data").and_then(|data| data.as_array()))
             .context("Missing OpenCode session list")?;
-        for session in data {
-            let session = serde_json::from_value::<OpenCodeSession>(session.clone())?;
+        for session in data
+            .iter()
+            .filter_map(|s| serde_json::from_value::<OpenCodeSession>(s.clone()).ok())
+        {
             // The API has no archived filter.
             if !session.is_open_root() {
                 continue;
@@ -141,7 +145,7 @@ pub fn find_root_session(
     Ok(None)
 }
 
-fn normalize_slug(text: &str) -> String {
+pub fn normalize_slug(text: &str) -> String {
     text.chars()
         .filter(|c| c.is_ascii_alphanumeric())
         .map(|c| c.to_ascii_lowercase())
@@ -216,6 +220,7 @@ pub mod fake_api {
             parent_id: None,
             time: OpenCodeSessionTime {
                 updated,
+                viewed: None,
                 archived: None,
             },
             location: Some(OpenCodeSessionLocation {

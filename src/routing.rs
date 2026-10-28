@@ -11,6 +11,7 @@
 //! [`look`] gathers (`docs/routing.md`).
 
 pub mod look;
+pub mod served;
 pub mod smart;
 
 /// The experiment that routes Mac captures with [`smart`] (`handoff::experiment`).
@@ -26,8 +27,8 @@ use crate::capture::scrawl_log;
 use crate::model::{Destination, ScrawlBundle};
 
 pub use scrawl_route::ladder::{
-    Browser, Hooks, RECORD, browser_kind, parse_lsof_cwd, parse_lsof_pids, project_root,
-    read_record, route, write_record,
+    Browser, Hooks, RECORD, SESSIONS_BUDGET, browser_kind, parse_lsof_cwd, parse_lsof_pids,
+    project_root, read_record, route, within, write_record,
 };
 pub use scrawl_route::url::{WebUrl, parse_url};
 
@@ -71,16 +72,35 @@ pub fn browser_tab_url(bundle_id: &str) -> Option<String> {
 }
 
 fn run_with_timeout(command: &mut Command, timeout: Duration) -> Option<std::process::Output> {
+    use std::io::Read as _;
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .ok()?;
+    // Read as it's written: output larger than a pipe's buffer would otherwise stall the child.
+    let drain = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut out = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut out);
+            }
+            out
+        })
+    };
+    let stdout = drain(child.stdout.take().map(|p| Box::new(p) as _));
+    let stderr = drain(child.stderr.take().map(|p| Box::new(p) as _));
     let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
-            Ok(Some(_)) => return child.wait_with_output().ok(),
+            Ok(Some(status)) => {
+                return Some(std::process::Output {
+                    status,
+                    stdout: stdout.join().ok()?,
+                    stderr: stderr.join().ok()?,
+                });
+            }
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
             _ => {
                 let _ = child.kill();
@@ -138,8 +158,12 @@ pub fn hooks() -> Hooks {
     Hooks {
         sdk: crate::web::lookup,
         listener_dir: listener_directory,
-        api: crate::handoff::api_get,
+        api: crate::handoff::api_get_within,
     }
+}
+
+fn routing_enabled() -> bool {
+    crate::handoff::auto_send() && std::env::var_os("SCRAWL_NO_OPENCODE").is_none()
 }
 
 /// Decides where a capture that just finished goes; `None` (logged) keeps it on the clipboard.
@@ -147,7 +171,7 @@ pub fn route_capture(
     front_bundle_id: Option<&str>,
     target_bundle_id: Option<&str>,
 ) -> Option<Destination> {
-    if !crate::handoff::auto_send() || std::env::var_os("SCRAWL_NO_OPENCODE").is_some() {
+    if !routing_enabled() {
         return None;
     }
     let url = capture_url(front_bundle_id, target_bundle_id)?;
@@ -172,14 +196,8 @@ pub fn look_capture(
     front_bundle_id: Option<&str>,
     target_bundle_id: Option<&str>,
 ) -> Option<look::Live> {
-    if !crate::handoff::auto_send() || std::env::var_os("SCRAWL_NO_OPENCODE").is_some() {
-        return None;
-    }
-    Some(look::look_live(
-        front_bundle_id,
-        target_bundle_id,
-        &look::Senses::default(),
-    ))
+    routing_enabled()
+        .then(|| look::look_live(front_bundle_id, target_bundle_id, &look::Senses::default()))
 }
 
 /// Smart routing's second half, once the bundle is built: decides, saves the evidence beside
@@ -199,7 +217,7 @@ pub fn judge_capture(
         scrawl_log(format!("routing: couldn't save {RECORD}: {err:#}"));
     }
     let outcome = match &judgement.decision {
-        smart::Decision::Send { to } => {
+        smart::Decision::Send { to, .. } => {
             format!("send to {} ({})", to.candidate.label(), to.candidate.id)
         }
         smart::Decision::Offer { choices } => format!(
@@ -249,7 +267,10 @@ pub fn explain_bundle(bundle: &Path, url: Option<&str>) -> Result<String> {
         .map(str::to_owned)
         .or_else(|| loaded.destination.as_ref().and_then(|d| d.url.clone()));
     if replayed {
-        let _ = writeln!(out, "Evidence  saved at capture time ({RECORD})");
+        let _ = writeln!(
+            out,
+            "Evidence  saved at capture time ({RECORD}); the bundle's clues read again with today's rules"
+        );
     } else {
         let _ = writeln!(
             out,

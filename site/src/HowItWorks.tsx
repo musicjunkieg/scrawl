@@ -506,7 +506,7 @@ export function HowItWorks() {
           </Visual>
           <div className="feature-copy">
             <h3>Each frame keeps its words</h3>
-            <p>Your speech is transcribed on your Mac, and each sentence goes with the frame it was about.</p>
+            <p>Your speech is transcribed on your computer, and each sentence goes with the frame it was about.</p>
           </div>
         </article>
         <article className="feature-card">

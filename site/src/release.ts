@@ -8,8 +8,9 @@ export const MAC_ZIP = "/releases/Scrawl-latest-arm64.zip"
 export const BREW = "brew install --cask kitlangton/tap/scrawl"
 export const SKILL = "bunx skills add kitlangton/scrawl"
 
-// Set this to the Windows build (e.g. "/releases/latest/Scrawl-windows-x64.zip"
-// or an installer) when it ships. While it's null the site says "coming soon".
-export const WINDOWS_DOWNLOAD: string | null = null
+// The zip .github/workflows/release-windows.yml builds for the same version,
+// copied next to the Mac files. A preview: unsigned, and it doesn't update
+// itself yet. Set it to null and the site says "coming soon" again.
+export const WINDOWS_DOWNLOAD: string | null = "/releases/Scrawl-latest-windows-x64.zip"
 
 export const RELEASE = latestRelease(appcast)

@@ -20,14 +20,14 @@ if [[ ${1:-} == --time-scale ]]; then
 fi
 scenes=("$@")
 if [[ ${#scenes[@]} -eq 0 ]]; then
-  scenes=(tap-then-area tap-then-window tap-then-screen hold-switcher finish cancel dismiss)
+  scenes=(tap-then-area tap-then-window tap-then-screen picker finish cancel dismiss)
 fi
 
 here=$(cd "$(dirname "$0")" && pwd)
+"$here/../screen-guard.sh"
 motion_lint=${MOTION_LINT:-$HOME/code/open-source/motion-lint/cli/motion-lint.ts}
 
 for scene in "${scenes[@]}"; do
-  caffeinate -u -t 20 >/dev/null 2>&1 &
   rm -f "$out/$scene.mov"
   mkdir -p "$out/runs/$scene/trace"
   log="$out/.$scene.log"

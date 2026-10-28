@@ -2,8 +2,8 @@ use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
 
 pub use scrawl_capture::audio::{
-    AudioCapture, RecordedAudio, Recorder, Sink, decode_wav_16k, encode_wav_16k, pcm16,
-    recorded_audio_from_wav, speech_islands,
+    AudioCapture, RecordedAudio, Recorder, Sink, decode_wav_16k, decode_wav_pcm16, encode_wav_16k,
+    pcm16, recorded_audio_from_wav, speech_islands,
 };
 // Opening a device into a `Sink` is `scrawl-capture`'s (`native::mic`).
 use scrawl_capture::native::mic::{device_name, open_device};
