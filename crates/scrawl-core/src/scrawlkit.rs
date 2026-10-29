@@ -214,6 +214,9 @@ pub fn ms(seconds: f64) -> u64 {
 /// Finger movement under this many points, held under this long, is a tap.
 const TAP_SLOP_PT: f64 = 12.0;
 const TAP_MS: u64 = 420;
+/// A mouse is steadier than a finger: moved this far it's a drag (a slider nudged, text
+/// selected), about where AppKit starts one.
+const CLICK_SLOP_PT: f64 = 4.0;
 
 /// Ink that never moves further than this many points from where it started draws nothing: a tap
 /// made while Draw was on.
@@ -221,10 +224,17 @@ const DOT_PT: f64 = 6.0;
 
 /// Turns raw touch samples into taps and swipes, normalized to the screen. A touch still down
 /// when the recording ends is left out: that's the press that stopped it (ScrawlKit's
-/// three-finger trigger), not something done in the app. With `mouse` (ScrawlKit on the Mac)
-/// they're clicks and drags instead, and a click held still is still a click.
-pub fn touch_events(touches: &[Touch], screen: Screen, mouse: bool) -> Vec<InteractionEvent> {
+/// three-finger trigger), not something done in the app.
+pub fn touch_events(touches: &[Touch], screen: Screen) -> Vec<InteractionEvent> {
+    pointer_events(touches, screen, false)
+}
+
+/// [`touch_events`], or with `mouse` (ScrawlKit on the Mac) clicks and drags: a click held
+/// still is still a click, timed when it's let go (when a button acts), and a smaller movement
+/// makes a drag.
+pub fn pointer_events(touches: &[Touch], screen: Screen, mouse: bool) -> Vec<InteractionEvent> {
     let button = if mouse { "left" } else { "touch" };
+    let slop = if mouse { CLICK_SLOP_PT } else { TAP_SLOP_PT };
     let mut sorted = touches.to_vec();
     sorted.sort_by(|a, b| a.t.total_cmp(&b.t));
     let (w, h) = (screen.width.max(1.0), screen.height.max(1.0));
@@ -251,9 +261,9 @@ pub fn touch_events(touches: &[Touch], screen: Screen, mouse: bool) -> Vec<Inter
             .find_map(|s| s.label.as_deref())
             .map(str::trim)
             .filter(|s| !s.is_empty());
-        if travel < TAP_SLOP_PT && (mouse || t1.saturating_sub(t0) < TAP_MS) {
+        if travel < slop && (mouse || t1.saturating_sub(t0) < TAP_MS) {
             out.push(InteractionEvent::Click {
-                t: t0,
+                t: if mouse { t1 } else { t0 },
                 x: x0,
                 y: y0,
                 button: Some(button.into()),
@@ -262,7 +272,7 @@ pub fn touch_events(touches: &[Touch], screen: Screen, mouse: bool) -> Vec<Inter
             });
         } else {
             let [x1, y1] = norm(last);
-            let drag_label = if travel < TAP_SLOP_PT {
+            let drag_label = if travel < slop {
                 Some(match hit_label {
                     Some(l) => format!("long press: {l}"),
                     None => "long press".into(),
@@ -318,7 +328,7 @@ impl Timeline {
             scale: 1.0,
         });
         let mouse = self.capture.as_deref() == Some("screenCaptureKit");
-        let mut events = touch_events(&self.touches, screen, mouse);
+        let mut events = pointer_events(&self.touches, screen, mouse);
         events.extend(self.events.iter().map(|e| InteractionEvent::AppEvent {
             t: ms(e.t),
             label: e.label.clone(),
@@ -472,7 +482,6 @@ mod tests {
                 touch(9.0, 7, 300.0, 610.0, "move"),
             ],
             screen,
-            false,
         );
         assert_eq!(events.len(), 4);
         assert!(matches!(
@@ -514,7 +523,7 @@ mod tests {
         let timeline: Timeline = serde_json::from_str(json).unwrap();
         assert_eq!(timeline.markers, vec![3.2]);
         assert_eq!(timeline.events[0].label, "Done tapped");
-        let events = touch_events(&timeline.touches, timeline.screen.unwrap(), false);
+        let events = touch_events(&timeline.touches, timeline.screen.unwrap());
         assert!(matches!(events[0], InteractionEvent::Click { t: 4000, .. }));
         // Timelines from before app context still parse, with none.
         assert!(timeline.short_version.is_none());
@@ -598,13 +607,18 @@ mod tests {
             {"t":1.0,"id":1,"x":80,"y":120,"phase":"down","label":"Clicked 0 times"},
             {"t":1.9,"id":1,"x":81,"y":120,"phase":"up"},
             {"t":2.0,"id":2,"x":100,"y":300,"phase":"down"},
-            {"t":2.4,"id":2,"x":500,"y":300,"phase":"up"}]}"#;
+            {"t":2.4,"id":2,"x":500,"y":300,"phase":"up"},
+            {"t":3.0,"id":3,"x":400,"y":200,"phase":"down","label":"Volume"},
+            {"t":3.3,"id":3,"x":407,"y":200,"phase":"up"}]}"#;
         let timeline: Timeline = serde_json::from_str(json).unwrap();
         let events = timeline.capture(1600, 1200, 3_000).events;
         let said: Vec<String> = events.iter().map(crate::sketch::describe_event).collect();
-        // Held for most of a second, a click is still a click.
+        // Held for most of a second, a click is still a click, timed when it was let go.
         assert!(said[0].starts_with("clicked “Clicked 0 times”"), "{said:?}");
+        assert_eq!(events[0].timestamp_ms(), 1_900);
         assert!(said[1].starts_with("dragged right"), "{said:?}");
+        // Seven points is a nudge of a slider, not a click.
+        assert!(said[2].starts_with("dragged “Volume”"), "{said:?}");
     }
 
     #[test]
