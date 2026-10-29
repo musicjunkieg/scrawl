@@ -1,7 +1,7 @@
 # A self-hostable receiver: "and your agent gets the bundle", without the Mac app
 
-Status: plan, written 2026-10-22. Nothing here is built yet. It follows phase 8 (`scrawl-ffi`) in
-`docs/library.md`.
+Status: R1 built (2026-10-29): `crates/scrawl-server` and `workers/scrawl-server`. The rest is
+planned. It follows phase 8 (`scrawl-ffi`) in `docs/library.md`.
 
 ## Why
 
@@ -53,12 +53,21 @@ still hold bundles for the other hand-offs.
    - ScrawlKit: with `compiles = .onDevice`, upload the finished bundle to `ScrawlConfig`'s
      receiver URL instead of the movie and `timeline.json`; the Mac app learns to accept a built
      bundle too, so both receivers take both.
-2. **`scrawl-server`** (the receiver; a new binary crate, one static binary plus a Docker image).
-   - `POST /bundles`: a zip of one `<id>.scrawl/`. Checks the token, the size (a limit, 200 MB by
-     default), that every path stays inside the bundle and that `scrawl.json` parses as `version: 1`;
-     stores it under `bundles/<id>.scrawl/`; replies as the ingest does.
-   - `GET /bundles` and `GET /bundles/<id>/<file>`: the list and the files, same token, for the
-     hand-offs below and for a person to look at.
+2. **`scrawl-server`** (the receiver). `crates/scrawl-server` holds all of it with no OS bindings:
+   `handle(config, request, store)` reads and writes through a `Store` trait. It runs as a
+   Cloudflare Worker (`workers/scrawl-server`, workers-rs compiled to wasm, bundles in R2), and
+   self-hosted on `workerd`, Cloudflare's open-source runtime, which runs in Docker. The Worker is
+   its own Cargo workspace, so the app's offline builds never need workers-rs.
+   - `POST /bundles`: a zip of one `<id>.scrawl/`, stored or deflated. Checks the token, the size
+     (100 MB by default, what Workers takes on the Free and Pro plans; unpacked, twice that), that
+     every path stays inside the bundle and that `scrawl.json` parses as `version: 1`; leaves out
+     `__MACOSX/` and dot files; stores it under `bundles/<id>.scrawl/` (`scrawl.json` last, then
+     `index/<newest first>-<id>` and `bundles/<id>.scrawl.json`); replies as the ingest does
+     (`{ok: true, delivered: false, state: "saved", id}`). A bundle already there gets the same
+     reply and isn't written again.
+   - `GET /bundles` (newest first, `?limit=`), `GET /bundles/<id>` and `GET /bundles/<id>/<file>`:
+     the list, one entry and the files, same token, for the hand-offs below and for a person to
+     look at. `GET /` answers without a token, to check a deploy.
    - Hands each new bundle to the configured hand-offs, through `scrawl-route`'s delivery queue so a
      failed send retries.
 3. **Hand-offs** (pick any; each is optional).
@@ -66,7 +75,7 @@ still hold bundles for the other hand-offs.
      to the session the upload names, else `smart::decide` on what the bundle records (URL,
      directory), else the newest root session. Same rules as `handoff::recorded_destination`: an
      explicit destination is never rerouted.
-   - **MCP**, for any agent (Claude Code, OpenCode, Cursor): `scrawl mcp` (stdio) lists recent
+   - **MCP**, for any agent (Claude Code, OpenCode, Cursor): the receiver's `/mcp` lists recent
      bundles and hands one over (summary text, contact sheet and frames as images, file paths). The
      agent pulls when the person says "look at my last scrawl", so nothing needs to know which
      session is open.
@@ -84,16 +93,18 @@ secret, so a deployed site should upload through its own backend, which holds th
 
 | Step | What | Rough size |
 |---|---|---|
-| R1 | `scrawl-server`: `POST /bundles`, storage, list, ingest-shaped reply, tests with `IngestHooks`-style fakes | 2 days |
+| R1 | `scrawl-server`: `POST /bundles`, storage, list, ingest-shaped reply, tests with a memory store; the Worker on R2 (done) | 2 days |
 | R2 | `scrawl-web` `bundle.send`, against R1 in the browser test | 0.5 day |
-| R3 | MCP hand-off (`scrawl mcp`) | 1 day |
+| R3 | MCP hand-off at `/mcp` on the receiver | 1 day |
 | R4 | OpenCode hand-off through `scrawl-route`, webhook | 1 day |
 | R5 | ScrawlKit upload of on-device bundles (after phase 8), Mac app accepts built bundles | 1 day |
 
-## Decisions needed
+## Decisions (2026-10-29)
 
-1. **Which hand-off first:** MCP (works with any agent, the agent pulls) or OpenCode (pushes into a
-   session, needs the agent host)?
-2. **Where it runs by default:** the agent's own machine (simplest, OpenCode works) or a shared
-   server (teams, needs forwarding for OpenCode)?
-3. **Name:** `scrawl-server`, or folded into the `scrawl` CLI as `scrawl serve`?
+1. **MCP first:** any agent pulls, so nothing needs to know which session is open. The receiver
+   serves MCP itself (Streamable HTTP at `/mcp`, same token), so an agent adds it once by URL.
+2. **A shared server by default,** not a process on the agent's machine: Cloudflare Workers first,
+   self-hosted `workerd` (Docker) for anyone else. OpenCode delivery (R4) needs the bundle on the
+   agent host, so it forwards there.
+3. **`scrawl-server`,** its own crate: the `scrawl` CLI is the Mac app and only builds on macOS and
+   Windows.

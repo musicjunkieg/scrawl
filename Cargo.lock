@@ -4795,6 +4795,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scrawl-server"
+version = "0.3.5"
+dependencies = [
+ "flate2",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "scrawl-wasm"
 version = "0.3.5"
 dependencies = [

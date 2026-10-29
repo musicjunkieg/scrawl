@@ -1,0 +1,16 @@
+# The receiver on Cloudflare Workers. README.md here has the steps.
+name = "scrawl-server"
+main = "build/worker/shim.mjs"
+compatibility_date = "2026-10-01"
+
+[build]
+command = "cargo install -q worker-build@^0.8 && worker-build --release"
+
+# Where bundles are kept: `npx wrangler r2 bucket create scrawl-bundles` makes it.
+[[r2_buckets]]
+binding = "BUNDLES"
+bucket_name = "scrawl-bundles"
+
+[vars]
+# The largest upload, in bytes (100 MB, what Workers accepts on the Free and Pro plans).
+MAX_UPLOAD_BYTES = "104857600"

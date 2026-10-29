@@ -532,6 +532,16 @@
       "docs": ["README.md#scrawlkit-macos", "Examples/ScrawlDemoMac/README.md"]
     },
     {
+      "id": "scrawl-server",
+      "group": "delivery",
+      "name": "Receiver on Cloudflare Workers",
+      "says": "scrawl-server takes uploaded .scrawl bundles (a zip from scrawl-web, or any built bundle) with a token and keeps them in R2, so a bundle has somewhere to go without the Mac app; agents read them over MCP next.",
+      "status": "main",
+      "platforms": ["linux"],
+      "added": "2026-10-29",
+      "docs": ["docs/receiver.md", "workers/scrawl-server/README.md"]
+    },
+    {
       "id": "skip-still-swipes",
       "group": "iphone",
       "name": "Skip swipes that moved nothing",
