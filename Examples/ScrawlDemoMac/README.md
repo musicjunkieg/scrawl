@@ -38,8 +38,11 @@ default once ScrawlCore is built).
 3. **Ink.** Record again, hold ⇧ and drag a circle around the text field. The frames should
    show the red circle.
 4. **Moving the window.** Record, drag the window somewhere else, click something, stop. The
-   frames should follow the window.
+   frames should follow the window, and the summary shouldn't have the title-bar drag.
 5. **Other apps stay out.** Put another app's window half over the demo and record. The other
    app shouldn't show in the frames.
+6. **A slip.** Press ⌃⌥⇧S, and as soon as the bar says "● Recording" press it again. The bar says
+   "Too short to keep" and no bundle is built. (Pressed again before "● Recording" shows, it says
+   "Stopped before anything was recorded" instead.)
 
 Bundles are in `~/Library/Application Support/ScrawlKit/dev.scrawl.demo.mac/`.

@@ -438,8 +438,10 @@ Scrawl.event("Saved")                    // optional: what the app did, on the t
 
 An AppKit app calls `Scrawl.shared.install()` once after launch instead. While recording, hold ⇧ and
 drag to draw; Help › Mark This Moment adds a marker and Help › Discard Scrawl Recording throws the
-recording away. `Scrawl.shared.shortcut` changes the key and `addsMenuItems = false` leaves the Help
-menu alone.
+recording away. A recording under a second with nothing clicked, drawn, marked or reported by the
+app (`Scrawl.event`) is a slip and isn't kept. Dragging the window by its title bar moves the
+recording with it and isn't a drag in the summary. `Scrawl.shared.shortcut` changes the key and
+`addsMenuItems = false` leaves the Help menu alone.
 
 It records with ScreenCaptureKit, so macOS asks once to let the app record the screen (System
 Settings › Privacy & Security › Screen & System Audio Recording, then the app restarts). Only the

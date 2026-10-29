@@ -138,6 +138,8 @@
     @ObservationIgnored private var touchID = 0
     @ObservationIgnored private var openTouch: Int?
     @ObservationIgnored private var lastMove: Double = 0
+    /// Where the window was when the open touch went down: a drag that moves it is the title bar's.
+    @ObservationIgnored private var touchWindowOrigin: CGPoint?
 
     // MARK: - Setup
 
@@ -352,6 +354,11 @@
       self.recorder = nil
       stopFollowingWindow()
       endStroke(at: CACurrentMediaTime() - zero)
+      // A second press straight after the first (nothing done, drawn or marked in it) is a slip,
+      // not a recording to build.
+      let tooShort = !discarding && CACurrentMediaTime() - zero < 1
+        && touches.isEmpty && strokes.isEmpty && markers.isEmpty && events.isEmpty
+      let throwAway = discarding || tooShort
 
       let bundleInfo = Bundle.main.infoDictionary ?? [:]
       let version = ProcessInfo.processInfo.operatingSystemVersion
@@ -378,8 +385,12 @@
       self.zero = nil
       self.startedAt = nil
       overlay?.clearInk()
-      overlay?.show(discarding ? nil : "Saving…")
-      if discarding { overlay?.orderOut(nil) }
+      if tooShort {
+        showBriefly("Too short to keep")
+      } else {
+        overlay?.show(throwAway ? nil : "Saving…")
+        if throwAway { overlay?.orderOut(nil) }
+      }
 
       Task {
         defer { isFinishing = false }
@@ -391,7 +402,7 @@
           showBriefly("The recording couldn't be saved")
           return
         }
-        if discarding {
+        if throwAway {
           try? FileManager.default.removeItem(at: recorder.movie)
           return
         }
@@ -523,6 +534,7 @@
         }
         touchID += 1
         openTouch = touchID
+        touchWindowOrigin = window?.frame.origin
         lastMove = t
         var touch: [String: Any] = ["t": t, "id": touchID, "x": sample[0], "y": sample[1], "phase": "down"]
         if let label = Self.label(at: global) { touch["label"] = label }
@@ -533,8 +545,10 @@
           overlay.extendStroke(to: point)
           return false
         }
+        guard let id = openTouch else { return true }
+        if dropTouchIfItMovedTheWindow(id) { return true }
         // Moves at most 30 a second, as on the phone.
-        guard let id = openTouch, t - lastMove >= 1.0 / 30 else { return true }
+        guard t - lastMove >= 1.0 / 30 else { return true }
         lastMove = t
         touches.append(["t": t, "id": id, "x": sample[0], "y": sample[1], "phase": "move"])
       case .leftMouseUp:
@@ -544,11 +558,21 @@
           return false
         }
         guard let id = openTouch else { return true }
+        if dropTouchIfItMovedTheWindow(id) { return true }
         openTouch = nil
         touches.append(["t": t, "id": id, "x": sample[0], "y": sample[1], "phase": "up"])
       default:
         break
       }
+      return true
+    }
+
+    /// A drag on the title bar moves the window, which the recording follows: it isn't something
+    /// done in the app, and drawn as a drag it would cross the app's content.
+    private func dropTouchIfItMovedTheWindow(_ id: Int) -> Bool {
+      guard let origin = touchWindowOrigin, let window, window.frame.origin != origin else { return false }
+      touches.removeAll { $0["id"] as? Int == id }
+      openTouch = nil
       return true
     }
 
