@@ -116,7 +116,8 @@ jobs:
 
   web:
     name: Web package
-    runs-on: ubuntu-latest
+    # Playwright 1.56.1 has no Chromium for ubuntu-latest's 26.04; 24.04 until it's bumped.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
