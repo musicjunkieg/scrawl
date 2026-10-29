@@ -36,15 +36,27 @@ impl scrawl_server::Store for R2 {
     }
 
     async fn list(&self, prefix: &str, limit: usize) -> std::result::Result<Vec<String>, String> {
-        let objects = self
-            .0
-            .list()
-            .prefix(prefix)
-            .limit(limit.min(1000) as u32)
-            .execute()
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(objects.objects().iter().map(|o| o.key()).collect())
+        // R2 can answer with fewer keys than asked for and a cursor for the rest.
+        let mut keys = Vec::new();
+        let mut cursor: Option<String> = None;
+        while keys.len() < limit {
+            let mut listing = self
+                .0
+                .list()
+                .prefix(prefix)
+                .limit((limit - keys.len()).min(1000) as u32);
+            if let Some(cursor) = cursor.take() {
+                listing = listing.cursor(cursor);
+            }
+            let page = listing.execute().await.map_err(|e| e.to_string())?;
+            keys.extend(page.objects().iter().map(|o| o.key()));
+            match page.cursor().filter(|_| page.truncated()) {
+                Some(next) => cursor = Some(next),
+                None => break,
+            }
+        }
+        keys.truncate(limit);
+        Ok(keys)
     }
 }
 
@@ -67,6 +79,21 @@ async fn fetch(mut request: Request, env: Env, _ctx: Context) -> Result<Response
         None => url.path().to_owned(),
     };
     let method = request.method();
+    let authorization = request.headers().get("Authorization")?;
+    // A wrong token or an upload that says it's too big is turned away before its body is read.
+    let length = request
+        .headers()
+        .get("Content-Length")?
+        .and_then(|n| n.parse().ok());
+    if let Some(reply) = scrawl_server::answer_before_body(
+        &config,
+        method.as_ref(),
+        &path,
+        authorization.as_deref(),
+        length,
+    ) {
+        return send(reply);
+    }
     let body = if method == Method::Post {
         request.bytes().await?
     } else {
@@ -77,13 +104,17 @@ async fn fetch(mut request: Request, env: Env, _ctx: Context) -> Result<Response
         scrawl_server::Request {
             method: method.to_string(),
             path,
-            authorization: request.headers().get("Authorization")?,
+            authorization,
             body,
             now_ms: Date::now().as_millis(),
         },
         &R2(env.bucket("BUNDLES")?),
     )
     .await;
+    send(reply)
+}
+
+fn send(reply: scrawl_server::Response) -> Result<Response> {
     let mut response = Response::from_bytes(reply.body)?.with_status(reply.status);
     response
         .headers_mut()

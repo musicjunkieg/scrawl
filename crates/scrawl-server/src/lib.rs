@@ -19,13 +19,14 @@ use serde::{Deserialize, Serialize};
 
 pub mod zip;
 
-/// 100 MB: what Cloudflare Workers accepts as a request body on the Free and Pro plans.
-pub const DEFAULT_MAX_UPLOAD: usize = 100 * 1024 * 1024;
+/// 40 MB. A Worker has 128 MB of memory, and an upload is held twice while it's unpacked (the
+/// zip, then its files), so this leaves room; Workers itself takes bodies up to 100 MB.
+pub const DEFAULT_MAX_UPLOAD: usize = 40 * 1024 * 1024;
 
 pub struct Config {
     /// The bearer token every request but `GET /` needs. Empty refuses everything.
     pub token: String,
-    /// The largest upload accepted, in bytes; unpacked, a bundle may be twice this.
+    /// The largest upload accepted, in bytes, zipped or unpacked.
     pub max_upload: usize,
 }
 
@@ -150,7 +151,32 @@ struct MetaDevice {
     name: Option<String>,
 }
 
-pub async fn handle(config: &Config, request: Request, store: &impl Store) -> Response {
+/// What can be answered before the body is read, from the method, path, `Authorization` and
+/// `Content-Length` headers: a missing token, or an upload that says it's too big. A front end
+/// calls this first so neither costs it memory; `handle` checks both again.
+pub fn answer_before_body(
+    config: &Config,
+    method: &str,
+    path: &str,
+    authorization: Option<&str>,
+    content_length: Option<u64>,
+) -> Option<Response> {
+    let path = path.split_once('?').map_or(path, |(p, _)| p);
+    if path.trim_matches('/').split('/').find(|p| !p.is_empty()) != Some("bundles") {
+        return None;
+    }
+    if let Err(response) = authorize(config, authorization) {
+        return Some(response);
+    }
+    (method == "POST" && content_length.is_some_and(|n| n > config.max_upload as u64)).then(too_big)
+}
+
+fn too_big() -> Response {
+    Response::error(413, "the bundle is larger than this receiver accepts")
+}
+
+pub async fn handle(config: &Config, mut request: Request, store: &impl Store) -> Response {
+    let body = std::mem::take(&mut request.body);
     let (path, query) = request
         .path
         .split_once('?')
@@ -178,7 +204,7 @@ pub async fn handle(config: &Config, request: Request, store: &impl Store) -> Re
         return response;
     }
     let result = match (method, &parts[1..]) {
-        ("POST", []) => upload(config, &request.body, request.now_ms, store).await,
+        ("POST", []) => upload(config, body, request.now_ms, store).await,
         ("GET", []) => list(query, store).await,
         ("GET", [id]) => entry(id, store).await,
         ("GET", [id, file @ ..]) => file_of(id, &file.join("/"), store).await,
@@ -230,32 +256,26 @@ fn saved_reply(id: &str) -> Response {
 
 async fn upload(
     config: &Config,
-    body: &[u8],
+    body: Vec<u8>,
     now_ms: u64,
     store: &impl Store,
 ) -> Result<Response, String> {
     if body.len() > config.max_upload {
-        return Ok(Response::error(
-            413,
-            "the bundle is larger than this receiver accepts",
-        ));
+        return Ok(too_big());
     }
-    let files = match zip::unzip(body, config.max_upload as u64 * 2) {
+    let files = match zip::unzip(&body, config.max_upload as u64) {
         Ok(files) => files,
-        Err(zip::ZipError::TooBig) => {
-            return Ok(Response::error(
-                413,
-                "the bundle is larger than this receiver accepts",
-            ));
-        }
+        Err(zip::ZipError::TooBig) => return Ok(too_big()),
         Err(zip::ZipError::Bad(why)) => return Ok(Response::error(400, &why)),
     };
+    // The files are out; the zip needn't sit in memory beside them.
+    drop(body);
 
     // One `<id>.scrawl/` folder, every path inside it. What Finder and the Mac app add on their
     // own (`__MACOSX/`, `.DS_Store`, `.deliver.json`) is left out.
-    let mut id: Option<&str> = None;
-    let mut inside = Vec::with_capacity(files.len());
-    for (name, bytes) in &files {
+    let mut id: Option<String> = None;
+    let mut inside: Vec<(String, Vec<u8>)> = Vec::with_capacity(files.len());
+    for (name, bytes) in files {
         if name.split('/').any(|part| part == "." || part == "..") {
             return Ok(Response::error(
                 400,
@@ -277,25 +297,26 @@ async fn upload(
                 "the zip should hold one <id>.scrawl folder",
             ));
         };
-        if id.is_some_and(|i| i != this) {
+        if id.as_deref().is_some_and(|i| i != this) {
             return Ok(Response::error(400, "the zip holds more than one bundle"));
         }
-        id = Some(this);
         if !safe_path(rest) {
             return Ok(Response::error(
                 400,
                 &format!("a file name isn't allowed: {name}"),
             ));
         }
-        inside.push((rest, bytes));
+        id = Some(this.to_owned());
+        inside.push((rest.to_owned(), bytes));
     }
     let Some(id) = id else {
         return Ok(Response::error(400, "the zip is empty"));
     };
-    let Some((_, scrawl_json)) = inside.iter().find(|(path, _)| *path == "scrawl.json") else {
+    let Some(at) = inside.iter().position(|(path, _)| path == "scrawl.json") else {
         return Ok(Response::error(400, "the bundle has no scrawl.json"));
     };
-    let meta: Meta = match serde_json::from_slice(scrawl_json) {
+    let (_, scrawl_json) = inside.remove(at);
+    let meta: Meta = match serde_json::from_slice(&scrawl_json) {
         Ok(meta) => meta,
         Err(error) => {
             return Ok(Response::error(
@@ -312,49 +333,40 @@ async fn upload(
     // `<folder>.json` is written last: a bundle counts as here only once it is, so an upload cut
     // off partway is simply written again when it's sent again.
     if store.get(&format!("{folder}.json")).await?.is_some() {
-        return Ok(saved_reply(id));
+        return Ok(saved_reply(&id));
     }
-    for (path, bytes) in inside.iter().filter(|(path, _)| *path != "scrawl.json") {
-        store
-            .put(
-                &format!("{folder}/{path}"),
-                bytes.to_vec(),
-                content_type(path),
-            )
-            .await?;
-    }
-    store
-        .put(
-            &format!("{folder}/scrawl.json"),
-            scrawl_json.to_vec(),
-            "application/json",
-        )
-        .await?;
     let entry = Entry {
-        id: id.to_owned(),
+        id: id.clone(),
         created_at_ms: meta.created_at_ms,
         received_at_ms: now_ms,
         duration_ms: meta.duration_ms,
         app: meta.target.and_then(|t| t.app).filter(|a| !a.is_empty()),
         device: meta.device.and_then(|d| d.name).filter(|d| !d.is_empty()),
-        files: inside.iter().map(|(path, _)| path.to_string()).collect(),
-        bytes: inside.iter().map(|(_, bytes)| bytes.len() as u64).sum(),
+        files: std::iter::once("scrawl.json".to_owned())
+            .chain(inside.iter().map(|(path, _)| path.clone()))
+            .collect(),
+        bytes: (scrawl_json.len() + inside.iter().map(|(_, b)| b.len()).sum::<usize>()) as u64,
     };
+    // Each file is handed over, not copied, so only one bundle's worth stays in memory.
+    for (path, bytes) in inside {
+        let kind = content_type(&path);
+        store.put(&format!("{folder}/{path}"), bytes, kind).await?;
+    }
     store
         .put(
-            &index_key(&entry),
-            serde_json::to_vec(&entry).unwrap_or_default(),
+            &format!("{folder}/scrawl.json"),
+            scrawl_json,
             "application/json",
         )
         .await?;
+    let entry_json = serde_json::to_vec(&entry).unwrap_or_default();
     store
-        .put(
-            &format!("{folder}.json"),
-            serde_json::to_vec(&entry).unwrap_or_default(),
-            "application/json",
-        )
+        .put(&index_key(&entry), entry_json.clone(), "application/json")
         .await?;
-    Ok(saved_reply(id))
+    store
+        .put(&format!("{folder}.json"), entry_json, "application/json")
+        .await?;
+    Ok(saved_reply(&id))
 }
 
 async fn list(query: &str, store: &impl Store) -> Result<Response, String> {

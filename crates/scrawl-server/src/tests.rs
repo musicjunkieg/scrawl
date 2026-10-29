@@ -369,3 +369,24 @@ fn unknown_paths_and_methods_are_refused() {
         404
     );
 }
+
+#[test]
+fn a_missing_token_or_a_too_big_upload_is_answered_before_the_body_is_read() {
+    let check = |method, path, token: Option<&str>, length| {
+        answer_before_body(&config(), method, path, token, length).map(|r| r.status)
+    };
+    let bearer = format!("Bearer {TOKEN}");
+    assert_eq!(check("POST", "/bundles", None, Some(10)), Some(401));
+    assert_eq!(
+        check("GET", "/bundles?limit=5", Some("Bearer nope"), None),
+        Some(401)
+    );
+    assert_eq!(
+        check("POST", "/bundles", Some(&bearer), Some(2 << 20)),
+        Some(413)
+    );
+    assert_eq!(check("POST", "/bundles", Some(&bearer), Some(10)), None);
+    // No length given: the body is read and its real size checked in `handle`.
+    assert_eq!(check("POST", "/bundles", Some(&bearer), None), None);
+    assert_eq!(check("GET", "/", None, None), None);
+}

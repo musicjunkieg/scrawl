@@ -103,7 +103,9 @@ pub fn unzip(bytes: &[u8], max_total: u64) -> Result<Vec<(String, Vec<u8>)>, Zip
             0 => data.to_vec(),
             8 => {
                 // One byte past the declared size shows a lie without unpacking the rest.
-                let mut out = Vec::with_capacity(size);
+                // Deflate grows data at most about 1032 times, so a size the archive overstates
+                // can't make this reserve more than its data could ever unpack to.
+                let mut out = Vec::with_capacity(size.min(packed.saturating_mul(1032)));
                 flate2::read::DeflateDecoder::new(data)
                     .take(size as u64 + 1)
                     .read_to_end(&mut out)

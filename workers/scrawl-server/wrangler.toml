@@ -12,5 +12,6 @@ binding = "BUNDLES"
 bucket_name = "scrawl-bundles"
 
 [vars]
-# The largest upload, in bytes (100 MB, what Workers accepts on the Free and Pro plans).
-MAX_UPLOAD_BYTES = "104857600"
+# The largest upload, in bytes (40 MB). A Worker has 128 MB of memory and holds an upload about
+# twice while unpacking it, so raise this with care (Workers itself takes up to 100 MB).
+MAX_UPLOAD_BYTES = "41943040"
