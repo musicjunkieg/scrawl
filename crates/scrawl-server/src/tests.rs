@@ -386,7 +386,8 @@ fn a_missing_token_or_a_too_big_upload_is_answered_before_the_body_is_read() {
         Some(413)
     );
     assert_eq!(check("POST", "/bundles", Some(&bearer), Some(10)), None);
-    // No length given: the body is read and its real size checked in `handle`.
-    assert_eq!(check("POST", "/bundles", Some(&bearer), None), None);
+    // No length given, the body couldn't be bounded before it's read.
+    assert_eq!(check("POST", "/bundles", Some(&bearer), None), Some(411));
+    assert_eq!(check("GET", "/bundles", Some(&bearer), None), None);
     assert_eq!(check("GET", "/", None, None), None);
 }

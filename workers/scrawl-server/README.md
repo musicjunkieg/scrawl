@@ -30,7 +30,8 @@ curl -H "Authorization: Bearer $TOKEN" https://…/bundles/web-1/summary.md
 The zip holds one `<id>.scrawl/` folder: what `scrawl-web`'s `bundle.zip()` makes, or a bundle
 folder zipped in Finder. Uploads up to 40 MB are taken (`MAX_UPLOAD_BYTES` in `wrangler.toml`): a
 Worker has 128 MB of memory and holds an upload about twice while unpacking it. A wrong token,
-or a `Content-Length` over the limit, is turned away before the upload is read. A token in a public web page isn't
+a `Content-Length` over the limit, or no `Content-Length` at all, is turned away before the
+upload is read. A token in a public web page isn't
 secret, so a deployed site should upload through its own backend.
 
 ## Run it on your own machine

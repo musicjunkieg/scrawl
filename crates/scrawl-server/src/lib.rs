@@ -152,8 +152,9 @@ struct MetaDevice {
 }
 
 /// What can be answered before the body is read, from the method, path, `Authorization` and
-/// `Content-Length` headers: a missing token, or an upload that says it's too big. A front end
-/// calls this first so neither costs it memory; `handle` checks both again.
+/// `Content-Length` headers: a missing token, an upload that says it's too big, or one that
+/// doesn't say how big it is (browsers, curl and URLSession all do). A front end calls this
+/// first, so no body is read that the limit couldn't bound; `handle` checks the size again.
 pub fn answer_before_body(
     config: &Config,
     method: &str,
@@ -168,7 +169,17 @@ pub fn answer_before_body(
     if let Err(response) = authorize(config, authorization) {
         return Some(response);
     }
-    (method == "POST" && content_length.is_some_and(|n| n > config.max_upload as u64)).then(too_big)
+    if method != "POST" {
+        return None;
+    }
+    match content_length {
+        None => Some(Response::error(
+            411,
+            "send the upload with its Content-Length",
+        )),
+        Some(n) if n > config.max_upload as u64 => Some(too_big()),
+        Some(_) => None,
+    }
 }
 
 fn too_big() -> Response {

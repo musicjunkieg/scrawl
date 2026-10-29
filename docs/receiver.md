@@ -60,8 +60,8 @@ still hold bundles for the other hand-offs.
    its own Cargo workspace, so the app's offline builds never need workers-rs.
    - `POST /bundles`: a zip of one `<id>.scrawl/`, stored or deflated. Checks the token, the size
      (40 MB by default, zipped or unpacked: a Worker has 128 MB and holds an upload twice while
-     unpacking it; a wrong token or an oversized `Content-Length` is refused before the body is
-     read), that every path stays inside the bundle and that `scrawl.json` parses as `version: 1`;
+     unpacking it; a wrong token, an oversized `Content-Length` or none at all is refused before the
+     body is read), that every path stays inside the bundle and that `scrawl.json` parses as `version: 1`;
      leaves out `__MACOSX/` and dot files; stores it under `bundles/<id>.scrawl/` (`scrawl.json` last, then
      `index/<newest first>-<id>` and `bundles/<id>.scrawl.json`); replies as the ingest does
      (`{ok: true, delivered: false, state: "saved", id}`). A bundle already there gets the same
