@@ -1,7 +1,7 @@
 # A self-hostable receiver: "and your agent gets the bundle", without the Mac app
 
-Status: R1 built (2026-10-29): `crates/scrawl-server` and `workers/scrawl-server`. The rest is
-planned. It follows phase 8 (`scrawl-ffi`) in `docs/library.md`.
+Status: R1 and R3 built (2026-10-29): `crates/scrawl-server` and `workers/scrawl-server`, with
+MCP at `/mcp`. The rest is planned. It follows phase 8 (`scrawl-ffi`) in `docs/library.md`.
 
 ## Why
 
@@ -76,8 +76,13 @@ still hold bundles for the other hand-offs.
      to the session the upload names, else `smart::decide` on what the bundle records (URL,
      directory), else the newest root session. Same rules as `handoff::recorded_destination`: an
      explicit destination is never rerouted.
-   - **MCP**, for any agent (Claude Code, OpenCode, Cursor): the receiver's `/mcp` lists recent
-     bundles and hands one over (summary text, contact sheet and frames as images, file paths). The
+   - **MCP**, for any agent (Claude Code, OpenCode, Cursor): the receiver's `/mcp`
+     (`crates/scrawl-server/src/mcp.rs`; Streamable HTTP answered with plain JSON, no event
+     stream or sessions; the same token; messages up to 1 MB) has three read-only tools:
+     `list_scrawls` (the newest, as text and `structuredContent`), `get_scrawl` (the newest unless
+     given an id: `summary.md` as text, the contact sheet as an image, and how to open a frame)
+     and `get_scrawl_file` (a frame as an image, a text file as text; images over 5 MB aren't sent
+     inline). Its `instructions` tell the agent to read the summary with the contact sheet. The
      agent pulls when the person says "look at my last scrawl", so nothing needs to know which
      session is open.
    - **Webhook**: a POST of the bundle's id, URL and summary to a configured address, for anything
@@ -96,7 +101,7 @@ secret, so a deployed site should upload through its own backend, which holds th
 |---|---|---|
 | R1 | `scrawl-server`: `POST /bundles`, storage, list, ingest-shaped reply, tests with a memory store; the Worker on R2 (done) | 2 days |
 | R2 | `scrawl-web` `bundle.send`, against R1 in the browser test | 0.5 day |
-| R3 | MCP hand-off at `/mcp` on the receiver | 1 day |
+| R3 | MCP hand-off at `/mcp` on the receiver (done) | 1 day |
 | R4 | OpenCode hand-off through `scrawl-route`, webhook | 1 day |
 | R5 | ScrawlKit upload of on-device bundles (after phase 8), Mac app accepts built bundles | 1 day |
 

@@ -391,3 +391,199 @@ fn a_missing_token_or_a_too_big_upload_is_answered_before_the_body_is_read() {
     assert_eq!(check("GET", "/bundles", Some(&bearer), None), None);
     assert_eq!(check("GET", "/", None, None), None);
 }
+
+fn rpc(store: &MemoryStore, message: serde_json::Value) -> Response {
+    run(handle(
+        &config(),
+        request("POST", "/mcp", message.to_string().into_bytes()),
+        store,
+    ))
+}
+
+fn result(response: &Response) -> serde_json::Value {
+    assert_eq!(response.status, 200, "{response:?}");
+    let body = reply(response);
+    assert!(body.get("error").is_none(), "{body}");
+    body["result"].clone()
+}
+
+fn call(store: &MemoryStore, tool: &str, arguments: serde_json::Value) -> serde_json::Value {
+    result(&rpc(
+        store,
+        serde_json::json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": {"name": tool, "arguments": arguments}}),
+    ))
+}
+
+#[test]
+fn an_agent_starts_an_mcp_session_and_finds_three_tools() {
+    let store = MemoryStore::default();
+    let started = result(&rpc(
+        &store,
+        serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "clientInfo": {"name": "claude-code", "version": "2.0"}}}),
+    ));
+    assert_eq!(started["protocolVersion"], "2025-06-18");
+    assert_eq!(started["serverInfo"]["name"], "scrawl-server");
+    assert!(
+        started["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("get_scrawl")
+    );
+    // A version it doesn't know gets the newest it does.
+    let unknown = result(&rpc(
+        &store,
+        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "initialize",
+            "params": {"protocolVersion": "1999-01-01"}}),
+    ));
+    assert_eq!(unknown["protocolVersion"], "2025-11-25");
+
+    let notified = rpc(
+        &store,
+        serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+    );
+    assert_eq!((notified.status, notified.body.len()), (202, 0));
+
+    let tools = result(&rpc(
+        &store,
+        serde_json::json!({"jsonrpc": "2.0", "id": 3, "method": "tools/list"}),
+    ));
+    let names: Vec<_> = tools["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["list_scrawls", "get_scrawl", "get_scrawl_file"]);
+    assert_eq!(
+        result(&rpc(
+            &store,
+            serde_json::json!({"jsonrpc": "2.0", "id": 4, "method": "ping"})
+        )),
+        serde_json::json!({})
+    );
+}
+
+#[test]
+fn an_agent_lists_looks_at_and_opens_a_scrawl() {
+    let store = MemoryStore::default();
+    assert!(
+        call(&store, "list_scrawls", serde_json::json!({}))["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("No Scrawl recordings")
+    );
+    for (id, at) in [("old", 1_761_777_000_000u64), ("new", 1_761_777_060_000)] {
+        run(handle(
+            &config(),
+            request("POST", "/bundles", bundle(id, at)),
+            &store,
+        ));
+    }
+
+    let listed = call(&store, "list_scrawls", serde_json::json!({"limit": 1}));
+    let text = listed["content"][0]["text"].as_str().unwrap();
+    assert_eq!(
+        text,
+        "- new · 2025-10-29 22:31 UTC · 0:18 · ScrawlDemo on Mac · 4 files"
+    );
+    assert_eq!(listed["structuredContent"]["scrawls"][0]["id"], "new");
+
+    // With no id, the newest: its summary, its contact sheet, and how to open a frame.
+    let looked = call(&store, "get_scrawl", serde_json::json!({}));
+    let content = looked["content"].as_array().unwrap();
+    assert_eq!(content[0]["text"], "[scrawl 0:18]");
+    assert_eq!(content[1]["type"], "image");
+    assert_eq!(content[1]["mimeType"], "image/png");
+    use base64::Engine;
+    let sheet = base64::engine::general_purpose::STANDARD
+        .decode(content[1]["data"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(sheet, b"\x89PNG sheet");
+    assert!(
+        content[2]["text"]
+            .as_str()
+            .unwrap()
+            .contains("frames/frame-01.png")
+    );
+    let old = call(&store, "get_scrawl", serde_json::json!({"id": "old"}));
+    assert_eq!(old["content"][0]["text"], "[scrawl 0:18]");
+
+    let frame = call(
+        &store,
+        "get_scrawl_file",
+        serde_json::json!({"id": "new", "path": "frames/frame-01.png"}),
+    );
+    assert_eq!(frame["content"][0]["type"], "image");
+    let json = call(
+        &store,
+        "get_scrawl_file",
+        serde_json::json!({"id": "new", "path": "scrawl.json"}),
+    );
+    assert!(
+        json["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("\"version\":1")
+    );
+
+    for (tool, arguments) in [
+        ("get_scrawl", serde_json::json!({"id": "missing"})),
+        ("get_scrawl", serde_json::json!({"id": "../escape"})),
+        (
+            "get_scrawl_file",
+            serde_json::json!({"id": "new", "path": "../../index"}),
+        ),
+        (
+            "get_scrawl_file",
+            serde_json::json!({"id": "new", "path": "frames/frame-09.png"}),
+        ),
+        ("get_scrawl_file", serde_json::json!({"id": "new"})),
+    ] {
+        let answer = call(&store, tool, arguments.clone());
+        assert_eq!(answer["isError"], true, "{tool} {arguments}");
+    }
+}
+
+#[test]
+fn mcp_needs_the_token_and_well_formed_messages() {
+    let store = MemoryStore::default();
+    let mut anonymous = request("POST", "/mcp", b"{}".to_vec());
+    anonymous.authorization = None;
+    assert_eq!(run(handle(&config(), anonymous, &store)).status, 401);
+    let bearer = format!("Bearer {TOKEN}");
+    assert_eq!(
+        answer_before_body(&config(), "POST", "/mcp", Some(&bearer), Some(2 << 20))
+            .map(|r| r.status),
+        Some(413)
+    );
+    assert_eq!(
+        answer_before_body(&config(), "POST", "/mcp", None, Some(10)).map(|r| r.status),
+        Some(401)
+    );
+    // No event stream to open.
+    assert_eq!(
+        run(handle(&config(), request("GET", "/mcp", vec![]), &store)).status,
+        405
+    );
+
+    let garbled = run(handle(
+        &config(),
+        request("POST", "/mcp", b"{not json".to_vec()),
+        &store,
+    ));
+    assert_eq!(reply(&garbled)["error"]["code"], -32700);
+    let unknown = rpc(
+        &store,
+        serde_json::json!({"jsonrpc": "2.0", "id": 9, "method": "resources/list"}),
+    );
+    assert_eq!(reply(&unknown)["error"]["code"], -32601);
+    assert_eq!(reply(&unknown)["id"], 9);
+    let no_tool = rpc(
+        &store,
+        serde_json::json!({"jsonrpc": "2.0", "id": 10, "method": "tools/call", "params": {"name": "rm_rf"}}),
+    );
+    assert_eq!(reply(&no_tool)["error"]["code"], -32602);
+}

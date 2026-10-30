@@ -8,6 +8,7 @@
 //!   bundle already here gets the same answer and isn't written again.
 //! - `GET /bundles`: the newest bundles first (`?limit=`, 20 by default, 100 at most).
 //! - `GET /bundles/<id>`: one bundle's entry; `GET /bundles/<id>/<file>`: one of its files.
+//! - `POST /mcp`: the bundles for agents, over MCP (`mcp.rs`).
 //! - `GET /`: says the receiver is up, without a token.
 //!
 //! Every other request needs `Authorization: Bearer <token>`.
@@ -17,6 +18,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+mod mcp;
 pub mod zip;
 
 /// 40 MB. A Worker has 128 MB of memory, and an upload is held twice while it's unpacked (the
@@ -163,9 +165,11 @@ pub fn answer_before_body(
     content_length: Option<u64>,
 ) -> Option<Response> {
     let path = path.split_once('?').map_or(path, |(p, _)| p);
-    if path.trim_matches('/').split('/').find(|p| !p.is_empty()) != Some("bundles") {
-        return None;
-    }
+    let limit = match path.trim_matches('/').split('/').find(|p| !p.is_empty()) {
+        Some("bundles") => config.max_upload,
+        Some("mcp") => mcp::MAX_MESSAGE,
+        _ => return None,
+    };
     if let Err(response) = authorize(config, authorization) {
         return Some(response);
     }
@@ -177,7 +181,7 @@ pub fn answer_before_body(
             411,
             "send the upload with its Content-Length",
         )),
-        Some(n) if n > config.max_upload as u64 => Some(too_big()),
+        Some(n) if n > limit as u64 => Some(too_big()),
         Some(_) => None,
     }
 }
@@ -208,11 +212,16 @@ pub async fn handle(config: &Config, mut request: Request, store: &impl Store) -
             _ => Response::error(405, "not allowed here"),
         };
     }
-    if parts[0] != "bundles" {
+    if parts[0] != "bundles" && parts != ["mcp"] {
         return Response::error(404, "not found");
     }
     if let Err(response) = authorize(config, request.authorization.as_deref()) {
         return response;
+    }
+    if parts == ["mcp"] {
+        return mcp::handle(method, &body, store)
+            .await
+            .unwrap_or_else(|error| Response::error(500, &format!("storage: {error}")));
     }
     let result = match (method, &parts[1..]) {
         ("POST", []) => upload(config, body, request.now_ms, store).await,
@@ -387,6 +396,15 @@ async fn list(query: &str, store: &impl Store) -> Result<Response, String> {
         .and_then(|n| n.parse::<usize>().ok())
         .unwrap_or(20)
         .clamp(1, 100);
+    let bundles = newest(store, limit).await?;
+    Ok(Response::json(
+        200,
+        &serde_json::json!({ "bundles": bundles }),
+    ))
+}
+
+/// Up to `limit` bundles' entries, newest first.
+async fn newest(store: &impl Store, limit: usize) -> Result<Vec<Entry>, String> {
     let mut bundles = Vec::new();
     for key in store.list("index/", limit).await? {
         if let Some(bytes) = store.get(&key).await?
@@ -395,10 +413,18 @@ async fn list(query: &str, store: &impl Store) -> Result<Response, String> {
             bundles.push(entry);
         }
     }
-    Ok(Response::json(
-        200,
-        &serde_json::json!({ "bundles": bundles }),
-    ))
+    Ok(bundles)
+}
+
+/// One bundle's entry, if it's here.
+async fn entry_of(id: &str, store: &impl Store) -> Result<Option<Entry>, String> {
+    if !safe_part(id) {
+        return Ok(None);
+    }
+    Ok(store
+        .get(&format!("bundles/{id}.scrawl.json"))
+        .await?
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok()))
 }
 
 async fn entry(id: &str, store: &impl Store) -> Result<Response, String> {
