@@ -1,0 +1,9 @@
+# pnpm runs these two packages' install scripts (esbuild bundles, workerd is the local runtime).
+allowBuilds:
+  esbuild: true
+  workerd: true
+minimumReleaseAgeExclude:
+  - '@cloudflare/runtime-types@0.1.19'
+  - cf@1.0.0-beta.26
+  - miniflare@5.20261023.3-beta
+  - wrangler@4.156.0
