@@ -4798,6 +4798,7 @@ dependencies = [
 name = "scrawl-server"
 version = "0.3.5"
 dependencies = [
+ "base64",
  "flate2",
  "serde",
  "serde_json",

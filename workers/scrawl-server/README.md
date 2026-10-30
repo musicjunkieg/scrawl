@@ -1,7 +1,7 @@
 # scrawl-server on Cloudflare Workers
 
 The receiver from `docs/receiver.md`: it takes `.scrawl` bundles uploaded with a token, keeps
-them in an R2 bucket, and serves them back. All of its logic is in `crates/scrawl-server`; this
+them in an R2 bucket, and serves them back, to people over HTTP and to agents over MCP. All of its logic is in `crates/scrawl-server`; this
 folder runs it as a Worker (Rust compiled to wasm with workers-rs).
 
 ## Deploy it (about 15 minutes the first time)
@@ -33,6 +33,21 @@ Worker has 128 MB of memory and holds an upload about twice while unpacking it. 
 a `Content-Length` over the limit, or no `Content-Length` at all, is turned away before the
 upload is read. A token in a public web page isn't
 secret, so a deployed site should upload through its own backend.
+
+## Give it to your agent (MCP)
+
+The receiver is also an MCP server at `/mcp`, with the same token. An agent added once can list
+the recordings, look at one (its `summary.md` and contact sheet) and open a frame at full size, so
+"look at my last scrawl" works in any session.
+
+- **Claude Code:**
+  `claude mcp add --transport http scrawl https://scrawl-server.<your-subdomain>.workers.dev/mcp --header "Authorization: Bearer $TOKEN"`
+- **Cursor** (`~/.cursor/mcp.json`) and others that take a URL and headers:
+  `{"mcpServers": {"scrawl": {"url": "https://…/mcp", "headers": {"Authorization": "Bearer …"}}}}`
+- **OpenCode** (`opencode.json`):
+  `{"mcp": {"scrawl": {"type": "remote", "url": "https://…/mcp", "headers": {"Authorization": "Bearer …"}}}}`
+
+Its tools are `list_scrawls`, `get_scrawl` (the newest unless given an id) and `get_scrawl_file`.
 
 ## Run it on your own machine
 
