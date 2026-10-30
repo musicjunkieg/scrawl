@@ -45,8 +45,11 @@ The zip holds one `<id>.scrawl/` folder: what `scrawl-web`'s `bundle.zip()` make
 folder zipped in Finder. Uploads up to 40 MB are taken (`MAX_UPLOAD_BYTES` in `cloudflare.config.ts`): a
 Worker has 128 MB of memory and holds an upload about twice while unpacking it. A wrong token,
 a `Content-Length` over the limit, or no `Content-Length` at all, is turned away before the
-upload is read. A token in a public web page or a shipped app isn't secret: give those the upload
-token, never `SCRAWL_TOKEN`.
+upload is read. A token in a shipped app isn't secret: give an app the upload token, never
+`SCRAWL_TOKEN`. A web page can't upload here directly (the receiver answers no CORS preflight), so
+a site uploads through its own backend, which holds the token. Anyone who pulls the upload token
+out of an app can add bundles, though not read them: if that happens, set a new
+`SCRAWL_UPLOAD_TOKEN`, deploy, and ship the app with it.
 
 ## Give it to your agent (MCP)
 
