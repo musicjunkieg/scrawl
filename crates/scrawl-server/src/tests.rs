@@ -587,3 +587,52 @@ fn mcp_needs_the_token_and_well_formed_messages() {
     );
     assert_eq!(reply(&no_tool)["error"]["code"], -32602);
 }
+
+#[test]
+fn messages_must_be_json_rpc_2_0() {
+    let store = MemoryStore::default();
+    for message in [
+        serde_json::json!({"id": 1, "method": "tools/list"}),
+        serde_json::json!({"jsonrpc": "1.0", "id": 1, "method": "tools/list"}),
+    ] {
+        let answer = rpc(&store, message);
+        assert_eq!(reply(&answer)["error"]["code"], -32600);
+        assert_eq!(reply(&answer)["id"], 1);
+    }
+}
+
+#[test]
+fn text_too_large_to_send_points_to_its_download() {
+    let store = MemoryStore::default();
+    let json = scrawl_json("big", 1_000);
+    let huge = vec![b'a'; (1 << 20) + 1];
+    let archive = zip(
+        &[
+            ("big.scrawl/scrawl.json", &json),
+            ("big.scrawl/summary.md", &huge),
+        ],
+        true,
+    );
+    let config = Config {
+        token: TOKEN.into(),
+        max_upload: 4 << 20,
+    };
+    let sent = run(handle(
+        &config,
+        request("POST", "/bundles", archive),
+        &store,
+    ));
+    assert_eq!(sent.status, 200, "{sent:?}");
+    let looked = call(&store, "get_scrawl", serde_json::json!({"id": "big"}));
+    let text = looked["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("too large") && text.contains("GET /bundles/big/summary.md"),
+        "{text}"
+    );
+    let file = call(
+        &store,
+        "get_scrawl_file",
+        serde_json::json!({"id": "big", "path": "summary.md"}),
+    );
+    assert_eq!(file["isError"], true);
+}

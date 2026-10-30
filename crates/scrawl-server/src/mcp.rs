@@ -20,6 +20,10 @@ const VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-
 /// Images bigger than this aren't sent inline (agents' limits are around 5 MB).
 const MAX_IMAGE: usize = 5 * 1024 * 1024;
 
+/// Text bigger than this isn't sent inline: a summary is a few KB, and a reply is built in memory
+/// a few times over, which a Worker's 128 MB couldn't hold for a file near the upload limit.
+const MAX_TEXT: usize = 1024 * 1024;
+
 const INSTRUCTIONS: &str = "Scrawl recordings are how people show you something: a screen \
 recording compiled into summary.md (what they said, clicked and drew, time-aligned, with \
 numbered keyframes) and images of those keyframes. When someone says \"look at my scrawl\" or \
@@ -46,6 +50,13 @@ pub(crate) async fn handle(
         return Ok(rpc_error(Value::Null, -32600, "Invalid request"));
     };
     let id = message.get("id").cloned();
+    if message.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
+        return Ok(rpc_error(
+            id.unwrap_or(Value::Null),
+            -32600,
+            "Invalid request: not JSON-RPC 2.0",
+        ));
+    }
     let Some(name) = message.get("method").and_then(Value::as_str) else {
         // A reply to something this server never asks, or nothing at all.
         return Ok(match id {
@@ -229,7 +240,13 @@ async fn get_scrawl(id: Option<String>, store: &impl Store) -> Result<Value, Str
     let folder = format!("bundles/{}.scrawl", entry.id);
     let mut content = Vec::new();
     match store.get(&format!("{folder}/summary.md")).await? {
-        Some(summary) => content.push(json!({ "type": "text", "text": String::from_utf8_lossy(&summary) })),
+        Some(summary) if summary.len() <= MAX_TEXT => {
+            content.push(json!({ "type": "text", "text": String::from_utf8_lossy(&summary) }));
+        }
+        Some(_) => content.push(json!({ "type": "text", "text": format!(
+            "Scrawl recording {}'s summary.md is too large to send here; it can be downloaded from GET /bundles/{}/summary.md.",
+            entry.id, entry.id
+        ) })),
         None => content.push(json!({ "type": "text", "text": format!("Scrawl recording {} has no summary.md.", entry.id) })),
     }
     if let Some(sheet) = store.get(&format!("{folder}/contact-sheet.png")).await?
@@ -271,9 +288,14 @@ async fn get_scrawl_file(id: &str, path: &str, store: &impl Store) -> Result<Val
             json!({ "content": [image(&bytes, kind)] })
         }
         "image/png" | "image/jpeg" => tool_error("That image is too large to send here."),
-        _ if kind.starts_with("text/") || kind == "application/json" => {
+        _ if (kind.starts_with("text/") || kind == "application/json")
+            && bytes.len() <= MAX_TEXT =>
+        {
             json!({ "content": [{ "type": "text", "text": String::from_utf8_lossy(&bytes) }] })
         }
+        _ if kind.starts_with("text/") || kind == "application/json" => tool_error(&format!(
+            "{path} is too large to send here; it can be downloaded from GET /bundles/{id}/{path}."
+        )),
         _ => tool_error(&format!(
             "{path} isn't an image or text, so it can't be shown here; it can be downloaded from GET /bundles/{id}/{path}."
         )),
