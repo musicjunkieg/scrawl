@@ -1573,17 +1573,51 @@
             movie: bundle.appending(path: "recording.\(recording.movie.pathExtension.lowercased())"),
             timeline: bundle.appending(path: "timeline.json")
           ))
+          // Paired with an HTTPS receiver: the bundle goes there too, and the strip follows it.
+          let uploads = hostedURL != nil && isConfigured
           if let onBundle {
             onBundle(bundle)
-          } else if sharesWhenDone, !recovered {
+          } else if sharesWhenDone, !recovered, !uploads {
             Self.share([bundle])
           }
-          if !recovered { await presentSent(.onPhone) }
+          if uploads {
+            await sendBundle(bundle, recordedAt: finished.recordedAt, shown: !recovered)
+          } else if !recovered {
+            await presentSent(.onPhone)
+          }
         case let .failure(error):
           print("Scrawl: building the bundle on the phone failed: \(error)")
           recordings.append(recording)
           if !recovered { await presentFailure(.notBuilt, recording: recording) }
         }
+      }
+
+      /// Queues a bundle built on the phone for the HTTPS receiver (`scrawl-server`'s
+      /// `POST /bundles`) and, when `shown`, follows its upload on the strip as `deliverHosted`
+      /// does. It's on the phone already, so a bundle that can't be queued is still "Saved on
+      /// this iPhone".
+      private func sendBundle(_ bundle: URL, recordedAt: String, shown: Bool) async {
+        syncOutbox()
+        guard let outbox, let target = hostedURL else {
+          if shown { await presentSent(.onPhone) }
+          return
+        }
+        let entry: Outbox.Entry
+        do {
+          entry = try await outbox.enqueue(
+            bundle: bundle, target: target, recordedAt: recordedAt,
+            failure: pairingRevoked ? .unauthorized : nil
+          )
+        } catch {
+          print("Scrawl: could not save the bundle for sending: \(error)")
+          if shown { await presentSent(.onPhone) }
+          return
+        }
+        guard shown else {
+          outbox.kick(force: true)
+          return
+        }
+        await follow(entry, on: outbox)
       }
 
       private nonisolated static func buildMarker(for movie: URL) -> URL {
@@ -1673,6 +1707,11 @@
       }
       // The outbox holds the only copy from here on.
       Self.delete(finished)
+      await follow(entry, on: outbox)
+    }
+
+    /// Shows `entry`'s upload on the strip ("Sending…", "Queued", "Sent to …") and starts it.
+    private func follow(_ entry: Outbox.Entry, on outbox: Outbox) async {
       if let failure = entry.failure {
         await presentFailure(ScrawlStrip.Failure(failure), entry: entry.id)
         return
@@ -1751,8 +1790,13 @@
       if let recording {
         Self.share([recording.movie, recording.timeline])
       } else if let entry, let outbox {
-        // The payload stays queued; the share sheet gets temporary copies of its files.
+        // The payload stays queued; the share sheet gets temporary copies of its files, or the
+        // bundle itself when it was built on the phone (it stays in `directory`).
         Task {
+          if let name = await outbox.entries().first(where: { $0.id == entry })?.bundle {
+            Self.share([Self.directory.appending(path: name, directoryHint: .isDirectory)])
+            return
+          }
           let folder = URL.temporaryDirectory.appending(path: "ScrawlShare", directoryHint: .isDirectory)
           guard let files = try? await outbox.extract(id: entry, into: folder) else { return }
           Self.share([files.movie, files.timeline]) {

@@ -379,6 +379,8 @@
         Text("Saved on your Mac")
       case .onPhone:
         Text("Saved on this iPhone")
+      case .received:
+        Text("Sent to your Scrawl server")
       }
     }
 

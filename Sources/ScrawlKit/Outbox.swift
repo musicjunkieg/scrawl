@@ -5,8 +5,10 @@ import Foundation
 ///
 /// Each recording is written to disk as its framed ingest payload (4-byte big-endian timeline
 /// length, timeline JSON, MP4) plus a small metadata file before anything is sent, and only
-/// deleted after a 2xx. Uploads are file uploads on a background `URLSession`, so they continue
-/// while the app is suspended or killed and never hold the movie in memory.
+/// deleted after a 2xx. A bundle built on the phone (`compiles = .onDevice`) is written as a zip
+/// instead and sent to the receiver's `POST /bundles` (`scrawl-server`, `docs/receiver.md`).
+/// Uploads are file uploads on a background `URLSession`, so they continue while the app is
+/// suspended or killed and never hold the movie in memory.
 ///
 /// - 401 and 403 (the link was revoked), 413 (too large) and every other 4xx except 408 and 429
 ///   (the server rejected these exact bytes, so resending can't help) are permanent: the entry stays
@@ -37,6 +39,9 @@ final class Outbox: NSObject, @unchecked Sendable {
     let recordedAt: String
     let createdAt: Date
     let payloadBytes: Int64
+    /// The bundle's folder name (in `Scrawl.directory`) when the payload is its zip for
+    /// `POST /bundles`; nil for a recording for the Mac's `POST /ingest`.
+    var bundle: String?
     var attempts = 0
     var lastError: String?
     var failure: Failure?
@@ -182,6 +187,18 @@ final class Outbox: NSObject, @unchecked Sendable {
     }
   }
 
+  /// Zips `bundle` (a `<id>.scrawl` folder) as the payload, writes its metadata, and returns the
+  /// entry, as `enqueue(timeline:…)` does for a recording.
+  func enqueue(bundle: URL, target: URL, recordedAt: String, failure: Failure? = nil) async throws -> Entry {
+    try await withCheckedThrowingContinuation { continuation in
+      queue.async { [self] in
+        continuation.resume(with: Result {
+          try write(bundle: bundle, target: target, recordedAt: recordedAt, failure: failure)
+        })
+      }
+    }
+  }
+
   /// Starts uploads for entries that are due (all pending entries when `force`), skipping any
   /// already in flight or permanently failed.
   func kick(force: Bool) {
@@ -304,6 +321,31 @@ final class Outbox: NSObject, @unchecked Sendable {
     return entry
   }
 
+  private func write(bundle: URL, target: URL, recordedAt: String, failure: Failure?) throws -> Entry {
+    try prepareDirectory()
+    let id = "bundle-\(bundle.deletingPathExtension().lastPathComponent)-\(UUID().uuidString.prefix(8).lowercased())"
+    let payload = payloadURL(id)
+    let bytes: Int64
+    do {
+      bytes = try BundleZip.write(folder: bundle, to: payload)
+      if let protection = Self.protection {
+        try FileManager.default.setAttributes(protection, ofItemAtPath: payload.path)
+      }
+    } catch {
+      try? FileManager.default.removeItem(at: payload)
+      throw error
+    }
+    var entry = Entry(id: id, target: target, recordedAt: recordedAt, createdAt: now(), payloadBytes: bytes)
+    entry.bundle = bundle.lastPathComponent
+    entry.failure = bytes > maxPayloadBytes ? .tooLarge : failure
+    save(entry)
+    guard FileManager.default.fileExists(atPath: metadataURL(id).path) else {
+      try? FileManager.default.removeItem(at: payload)
+      throw CocoaError(.fileWriteUnknown)
+    }
+    return entry
+  }
+
   private func save(_ entry: Entry) {
     guard let data = try? JSONEncoder().encode(entry) else { return }
     #if os(iOS)
@@ -370,9 +412,9 @@ final class Outbox: NSObject, @unchecked Sendable {
   private func start(_ entry: Entry) {
     guard let token, !token.isEmpty else { return }
     let base = target ?? entry.target
-    var request = URLRequest(url: base.appending(path: "ingest"))
+    var request = URLRequest(url: base.appending(path: entry.bundle == nil ? "ingest" : "bundles"))
     request.httpMethod = "POST"
-    request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+    request.setValue(entry.bundle == nil ? "application/octet-stream" : "application/zip", forHTTPHeaderField: "Content-Type")
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     // Apple reserves `Authorization` for the URL loading system, so a background session may drop
     // or replace it; the server also accepts the token here.
@@ -423,7 +465,9 @@ final class Outbox: NSObject, @unchecked Sendable {
     case .success:
       try? FileManager.default.removeItem(at: payloadURL(id))
       try? FileManager.default.removeItem(at: metadataURL(id))
-      onEvent(.sent(id: id, reply: IngestReply(body: body)))
+      let reply = IngestReply(body: body)
+      // A receiver keeps a bundle for agents to fetch; "saved" there isn't "on your Mac".
+      onEvent(.sent(id: id, reply: entry.bundle != nil && reply == .saved ? .received : reply))
     case let .permanent(failure):
       entry.failure = failure
       entry.lastError = "HTTP \(status ?? 0)"

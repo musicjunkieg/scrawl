@@ -9,9 +9,11 @@
 //! - `GET /bundles`: the newest bundles first (`?limit=`, 20 by default, 100 at most).
 //! - `GET /bundles/<id>`: one bundle's entry; `GET /bundles/<id>/<file>`: one of its files.
 //! - `POST /mcp`: the bundles for agents, over MCP (`mcp.rs`).
+//! - `GET /health`: whether the token is right (ScrawlKit asks before it sends).
 //! - `GET /`: says the receiver is up, without a token.
 //!
-//! Every other request needs `Authorization: Bearer <token>`.
+//! Every other request needs `Authorization: Bearer <token>`, or `X-Scrawl-Token: <token>` (see
+//! [`authorization`]).
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -198,6 +200,13 @@ pub fn answer_before_body(
     }
 }
 
+/// The `Authorization` value to check, from the request's `Authorization` and `X-Scrawl-Token`
+/// headers. ScrawlKit sends both: iOS may drop `Authorization` from a background upload, since
+/// Apple reserves it for the URL loading system.
+pub fn authorization(header: Option<String>, scrawl_token: Option<String>) -> Option<String> {
+    header.or_else(|| scrawl_token.map(|token| format!("Bearer {}", token.trim())))
+}
+
 fn too_big() -> Response {
     Response::error(413, "the bundle is larger than this receiver accepts")
 }
@@ -225,11 +234,17 @@ pub async fn handle(config: &Config, mut request: Request, store: &impl Store) -
             _ => Response::error(405, "not allowed here"),
         };
     }
-    if parts[0] != "bundles" && parts != ["mcp"] {
+    if parts[0] != "bundles" && parts != ["mcp"] && parts != ["health"] {
         return Response::error(404, "not found");
     }
     if let Err(response) = authorize(config, request.authorization.as_deref()) {
         return response;
+    }
+    if parts == ["health"] {
+        return match method {
+            "GET" | "HEAD" => Response::json(200, &serde_json::json!({ "ok": true })),
+            _ => Response::error(405, "not allowed here"),
+        };
     }
     if parts == ["mcp"] {
         return mcp::handle(method, &body, store)
