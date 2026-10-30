@@ -13,6 +13,10 @@ export default defineConfig({
 			// The largest upload, in bytes (40 MB). A Worker has 128 MB of memory and holds an upload
 			// about twice while unpacking it, so raise this with care (Workers itself takes up to 100 MB).
 			MAX_UPLOAD_BYTES: bindings.text("41943040"),
+			// Uploads with SCRAWL_UPLOAD_TOKEN (the one an app carries): 20 a minute from one address,
+			// so a token pulled out of an app can't fill the bucket quickly. The namespace is any
+			// number unique in the account.
+			UPLOADS: bindings.rateLimit({ namespace: "1001", simple: { limit: 20, period: 60 } }),
 		},
 	},
 });

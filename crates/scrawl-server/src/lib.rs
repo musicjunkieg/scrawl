@@ -220,6 +220,29 @@ pub fn authorization(
     }
 }
 
+/// Whether this request sends a bundle with the upload token, the one an app carries: what a
+/// front end with a rate limiter counts (`workers/scrawl-server` allows 20 a minute from one
+/// address), so a token pulled out of an app can't fill the bucket quickly. The owner's token
+/// isn't counted.
+pub fn counts_toward_upload_limit(
+    config: &Config,
+    method: &str,
+    path: &str,
+    authorization: Option<&str>,
+) -> bool {
+    let path = path.split_once('?').map_or(path, |(p, _)| p);
+    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    method == "POST"
+        && parts == ["bundles"]
+        && matches!(access(config, authorization), Ok(Access::Upload))
+}
+
+/// The answer once an address has sent more than its share. ScrawlKit's outbox waits and tries
+/// again on a 429.
+pub fn too_many_uploads() -> Response {
+    Response::error(429, "too many uploads from here; try again in a minute")
+}
+
 fn too_big() -> Response {
     Response::error(413, "the bundle is larger than this receiver accepts")
 }

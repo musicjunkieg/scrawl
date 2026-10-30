@@ -102,7 +102,8 @@ backend (the receiver answers no CORS preflight). A token in a shipped app isn't
 receiver has two: `SCRAWL_TOKEN` reads and sends everything (the
 owner and their agent), and `SCRAWL_UPLOAD_TOKEN` only sends bundles (`POST /bundles`,
 `GET /health`; anything else is 403), so the one an app carries can add bundles but not read
-anyone's.
+anyone's. On Workers its uploads are limited to 20 a minute from one address (a rate-limit binding;
+429 past it), so a token pulled out of an app can't fill the bucket quickly.
 
 ## Order and size
 

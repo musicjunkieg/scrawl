@@ -48,8 +48,10 @@ a `Content-Length` over the limit, or no `Content-Length` at all, is turned away
 upload is read. A token in a shipped app isn't secret: give an app the upload token, never
 `SCRAWL_TOKEN`. A web page can't upload here directly (the receiver answers no CORS preflight), so
 a site uploads through its own backend, which holds the token. Anyone who pulls the upload token
-out of an app can add bundles, though not read them: if that happens, set a new
-`SCRAWL_UPLOAD_TOKEN`, deploy, and ship the app with it.
+out of an app can add bundles, though not read them. So uploads with the upload token are limited
+to 20 a minute from one address (`UPLOADS` in `cloudflare.config.ts`; past it the receiver answers
+429, which ScrawlKit waits out and retries). If a token is misused anyway, set a new
+`SCRAWL_UPLOAD_TOKEN`, deploy, and ship the app with it. Your own token isn't limited.
 
 ## Give it to your agent (MCP)
 

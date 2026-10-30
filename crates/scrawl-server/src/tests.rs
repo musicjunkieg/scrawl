@@ -250,7 +250,34 @@ fn the_upload_token_sends_bundles_but_reads_nothing() {
         200
     );
     let given = authorization(&both, Some("Bearer replaced".into()), Some(UPLOAD.into()));
-    assert_eq!(given, Some(bearer));
+    assert_eq!(given, Some(bearer.clone()));
+    // Only the upload token's uploads count toward a front end's rate limit.
+    assert!(counts_toward_upload_limit(
+        &both,
+        "POST",
+        "/bundles",
+        Some(&bearer)
+    ));
+    let owner = format!("Bearer {TOKEN}");
+    assert!(!counts_toward_upload_limit(
+        &both,
+        "POST",
+        "/bundles",
+        Some(&owner)
+    ));
+    assert!(!counts_toward_upload_limit(
+        &both,
+        "GET",
+        "/health",
+        Some(&bearer)
+    ));
+    assert!(!counts_toward_upload_limit(
+        &both,
+        "POST",
+        "/bundles",
+        Some("Bearer wrong")
+    ));
+    assert_eq!(too_many_uploads().status, 429);
     // Without an upload token set, it's just a wrong token.
     let mut sent = with("POST", "/bundles", bundle("app-2", 2_000));
     sent.authorization = Some(format!("Bearer {UPLOAD}"));
