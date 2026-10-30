@@ -22,6 +22,25 @@ struct ContentView: View {
           }
           TextField("Type something", text: $note)
         }
+        Section {
+          if let server = Scrawl.shared.serverURLs.first(where: { $0.scheme == "https" }) {
+            LabeledContent("Sending to", value: server.host() ?? server.absoluteString)
+            Button("Stop sending", role: .destructive) {
+              Scrawl.handleSetupURL(URL(string: "scrawldemo://scrawl?reset=1")!)
+            }
+          } else {
+            // A setup link copied on the Mac reaches here through Universal Clipboard.
+            PasteButton(payloadType: String.self) { links in
+              guard let link = links.first.flatMap({ URL(string: $0.trimmingCharacters(in: .whitespacesAndNewlines)) })
+              else { return }
+              Task { @MainActor in Scrawl.handleSetupURL(link) }
+            }
+          }
+        } header: {
+          Text("Scrawl server")
+        } footer: {
+          Text("Paste a setup link (scrawldemo://scrawl?url=…&token=…) to send each bundle to your scrawl-server as well.")
+        }
         Section("Bundles on this iPhone") {
           if bundles.isEmpty {
             Text("None yet").foregroundStyle(.secondary)

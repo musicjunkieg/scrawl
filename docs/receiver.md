@@ -1,7 +1,7 @@
 # A self-hostable receiver: "and your agent gets the bundle", without the Mac app
 
 Status: R1 and R3 built (2026-10-29): `crates/scrawl-server` and `workers/scrawl-server`, with
-MCP at `/mcp`. The rest is planned. It follows phase 8 (`scrawl-ffi`) in `docs/library.md`.
+MCP at `/mcp`. R5's upload from ScrawlKit on the iPhone built (2026-10-30); the rest is planned. It follows phase 8 (`scrawl-ffi`) in `docs/library.md`.
 
 ## Why
 
@@ -50,9 +50,14 @@ still hold bundles for the other hand-offs.
    - `scrawl-web`: `bundle.send({ url, token, session? })` posts the zip (`application/zip`,
      `Authorization: Bearer <token>`) and resolves with the receiver's reply. The page decides
      whether to call it; nothing is sent otherwise, as today.
-   - ScrawlKit: with `compiles = .onDevice`, upload the finished bundle to `ScrawlConfig`'s
-     receiver URL instead of the movie and `timeline.json`; the Mac app learns to accept a built
-     bundle too, so both receivers take both.
+   - ScrawlKit (built for the iPhone): with `compiles = .onDevice` and a setup link to an HTTPS
+     receiver, the finished bundle is zipped (`BundleZip`, stored, one `<id>.scrawl/` folder) into
+     the outbox and sent to `POST /bundles` instead of the movie and `timeline.json` to
+     `/ingest`, retried in the background like a hosted recording. The receiver's
+     `{state: "saved"}` reads as "Sent to your Scrawl server". The token also goes in
+     `X-Scrawl-Token`, since iOS may drop `Authorization` from a background upload, and
+     `GET /health` answers ScrawlKit's token check. Still to do: ScrawlKit for Mac (no pairing
+     yet), and the Mac app accepting a built bundle, so both receivers take both.
 2. **`scrawl-server`** (the receiver). `crates/scrawl-server` holds all of it with no OS bindings:
    `handle(config, request, store)` reads and writes through a `Store` trait. It runs as a
    Cloudflare Worker (`workers/scrawl-server`, workers-rs compiled to wasm, bundles in R2), and
@@ -103,7 +108,7 @@ secret, so a deployed site should upload through its own backend, which holds th
 | R2 | `scrawl-web` `bundle.send`, against R1 in the browser test | 0.5 day |
 | R3 | MCP hand-off at `/mcp` on the receiver (done) | 1 day |
 | R4 | OpenCode hand-off through `scrawl-route`, webhook | 1 day |
-| R5 | ScrawlKit upload of on-device bundles (after phase 8), Mac app accepts built bundles | 1 day |
+| R5 | ScrawlKit upload of on-device bundles (iPhone done), Mac app accepts built bundles | 1 day |
 
 ## Decisions (2026-10-29)
 

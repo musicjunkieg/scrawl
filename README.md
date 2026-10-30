@@ -421,7 +421,11 @@ Each recording then becomes `Documents/Scrawl/<stamp>.scrawl` on the phone, buil
 compiler as the Mac's, with `recording.mp4` and `timeline.json` inside. The narration is transcribed
 offline with Apple's speech recognition, which needs `NSSpeechRecognitionUsageDescription` in the
 Info.plist; iOS asks once. Without the key, or if the person declines, the bundle has no transcript
-and `summary.md` says why. With `.onDevice`, ScrawlKit is active without pairing. `Scrawl.shared.experiments` names Scrawl experiments to try in those bundles, as the Mac app's `config.json` does (`"skipStillSwipes"`). `Examples/ScrawlDemo.swiftpm` is a small app set up this way, to try on an iPhone (its README has the steps).
+and `summary.md` says why. With `.onDevice`, ScrawlKit is active without pairing. Paired with an
+HTTPS receiver (`scrawl-server`, `workers/scrawl-server`) by a setup link, it also uploads each
+bundle there through the same background outbox as hosted recordings, and the strip follows it to
+"Sent to your Scrawl server". The receiver must be a `scrawl-server`: a Problems board takes
+recordings, not bundles. `Scrawl.shared.experiments` names Scrawl experiments to try in those bundles, as the Mac app's `config.json` does (`"skipStillSwipes"`). `Examples/ScrawlDemo.swiftpm` is a small app set up this way, to try on an iPhone (its README has the steps).
 
 ### ScrawlKit (macOS)
 

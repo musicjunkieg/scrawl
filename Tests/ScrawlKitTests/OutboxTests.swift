@@ -221,6 +221,55 @@ struct OutboxTests {
     #expect(await eventually { filesOnDisk.isEmpty })
   }
 
+  @Test func aBundleBuiltOnThePhoneIsZippedAndSentToTheReceiver() async throws {
+    StubServer.reset([.init(body: Data(#"{"ok":true,"delivered":false,"state":"saved","id":"phone-1"}"#.utf8))])
+    let bundle = directory.deletingLastPathComponent().appending(path: "phone-1.scrawl", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: bundle.appending(path: "frames"), withIntermediateDirectories: true)
+    try Data("[scrawl 0:04]".utf8).write(to: bundle.appending(path: "summary.md"))
+    try Data(#"{"version":1}"#.utf8).write(to: bundle.appending(path: "scrawl.json"))
+    try movieBytes.write(to: bundle.appending(path: "recording.mp4"))
+    try Data("frame".utf8).write(to: bundle.appending(path: "frames/frame-01.png"))
+    try Data("hidden".utf8).write(to: bundle.appending(path: ".DS_Store"))
+
+    let outbox = makeOutbox()
+    let entry = try await outbox.enqueue(bundle: bundle, target: target, recordedAt: "2026-10-30T01:00:00Z")
+    #expect(entry.bundle == "phone-1.scrawl")
+    outbox.kick(force: false)
+    // A receiver's "saved" is kept there for agents, not "on your Mac".
+    #expect(await eventually { events.all.contains(.sent(id: entry.id, reply: .received)) })
+    let received = try #require(StubServer.received.first)
+    #expect(received.request.url == target.appending(path: "bundles"))
+    #expect(received.request.value(forHTTPHeaderField: "Content-Type") == "application/zip")
+    #expect(received.request.value(forHTTPHeaderField: "X-Scrawl-Token") == "pbcap_test")
+    #expect(received.request.value(forHTTPHeaderField: "Content-Length") == String(entry.payloadBytes))
+    #expect(Int64(received.body.count) == entry.payloadBytes)
+    #expect(await eventually { filesOnDisk.isEmpty })
+
+    #if os(macOS)
+      // The zip is one `<id>.scrawl/` folder, as `unzip` reads it, with the files unchanged.
+      let zip = directory.deletingLastPathComponent().appending(path: "sent.zip")
+      try received.body.write(to: zip)
+      #expect(try unzip(["-Z1", zip.path]) == "phone-1.scrawl/frames/frame-01.png\nphone-1.scrawl/recording.mp4\nphone-1.scrawl/scrawl.json\nphone-1.scrawl/summary.md\n")
+      #expect(try unzip(["-tq", zip.path]).contains("No errors"))
+      #expect(try unzip(["-p", zip.path, "phone-1.scrawl/summary.md"]) == "[scrawl 0:04]")
+    #endif
+  }
+
+  #if os(macOS)
+    /// What `/usr/bin/unzip` prints for `arguments`.
+    private func unzip(_ arguments: [String]) throws -> String {
+      let process = Process()
+      process.executableURL = URL(filePath: "/usr/bin/unzip")
+      process.arguments = arguments
+      let pipe = Pipe()
+      process.standardOutput = pipe
+      try process.run()
+      let output = pipe.fileHandleForReading.readDataToEndOfFile()
+      process.waitUntilExit()
+      return String(decoding: output, as: UTF8.self)
+    }
+  #endif
+
   @Test func aMacThatKeptItButCouldNotForwardItIsNotAskedAgain() async throws {
     StubServer.reset([.init(body: Data(#"{"ok":true,"delivered":false,"state":"queued","sessionTitle":"UP DOWN"}"#.utf8))])
     let outbox = makeOutbox()

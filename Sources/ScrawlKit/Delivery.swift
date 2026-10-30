@@ -17,6 +17,9 @@ public enum IngestReply: Equatable, Sendable {
   case saved
   /// Built into a bundle on the phone (`Scrawl.Compiling.onDevice`) and handed to the app.
   case onPhone
+  /// Built on the phone and taken by a Scrawl receiver (`scrawl-server`), which keeps it for
+  /// agents to fetch.
+  case received
 
   /// Reads a 2xx response body.
   init(body: Data) {

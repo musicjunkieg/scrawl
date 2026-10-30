@@ -542,6 +542,16 @@
       "docs": ["docs/receiver.md", "workers/scrawl-server/README.md"]
     },
     {
+      "id": "scrawlkit-bundle-upload",
+      "group": "iphone",
+      "name": "Upload bundles built on the iPhone",
+      "says": "With compiles = .onDevice and a setup link to a scrawl-server, ScrawlKit uploads each bundle it builds to the receiver's POST /bundles through the background outbox, so an agent can fetch it over MCP.",
+      "status": "main",
+      "platforms": ["ios"],
+      "added": "2026-10-30",
+      "docs": ["docs/receiver.md", "Examples/ScrawlDemo.swiftpm/README.md"]
+    },
+    {
       "id": "skip-still-swipes",
       "group": "iphone",
       "name": "Skip swipes that moved nothing",

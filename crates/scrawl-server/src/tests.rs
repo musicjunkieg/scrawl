@@ -197,6 +197,38 @@ fn every_request_but_the_front_page_needs_the_token() {
 }
 
 #[test]
+fn scrawlkit_checks_its_token_and_may_send_it_in_its_own_header() {
+    let store = MemoryStore::default();
+    let health = run(handle(&config(), request("GET", "/health", vec![]), &store));
+    assert_eq!(health.status, 200);
+    assert_eq!(reply(&health)["ok"], true);
+    let mut wrong = request("GET", "/health", vec![]);
+    wrong.authorization = Some("Bearer wrong".into());
+    assert_eq!(run(handle(&config(), wrong, &store)).status, 401);
+
+    // A background upload whose Authorization iOS dropped still has X-Scrawl-Token.
+    let mut sent = request("POST", "/bundles", bundle("phone-1", 1_000));
+    sent.authorization = authorization(&config(), None, Some(format!("{TOKEN}\n")));
+    assert_eq!(run(handle(&config(), sent, &store)).status, 200);
+    // One replaced by something else still gets in with the other, before the body too.
+    let bearer = format!("Bearer {TOKEN}");
+    for (header, other) in [
+        (Some("Bearer replaced".to_owned()), Some(TOKEN.to_owned())),
+        (Some(bearer.clone()), Some("wrong".to_owned())),
+    ] {
+        let given = authorization(&config(), header, other);
+        assert_eq!(given.as_deref(), Some(bearer.as_str()));
+        let early = answer_before_body(&config(), "POST", "/bundles", given.as_deref(), Some(10));
+        assert!(early.is_none());
+    }
+    // Neither right: refused.
+    let given = authorization(&config(), Some("Bearer a".into()), Some("b".into()));
+    let early = answer_before_body(&config(), "POST", "/bundles", given.as_deref(), Some(10));
+    assert_eq!(early.map(|r| r.status), Some(401));
+    assert_eq!(authorization(&config(), None, None), None);
+}
+
+#[test]
 fn paths_outside_the_bundle_are_refused() {
     let store = MemoryStore::default();
     let json = scrawl_json("web-1", 1_000);

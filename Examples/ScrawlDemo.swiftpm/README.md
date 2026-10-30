@@ -43,3 +43,24 @@ phone (`Scrawl.shared.compiles = .onDevice`), with no Mac running Scrawl.
    time the app starts.
 
 The bundles also show in the app's list, each with Share.
+
+## Send to your Scrawl server (about 5 minutes)
+
+With a `scrawl-server` deployed (`workers/scrawl-server/README.md`), the demo uploads each bundle
+there too, so an agent can fetch it over MCP.
+
+1. On the Mac, in `workers/scrawl-server`, copy a setup link for the demo (it holds the token, so
+   don't paste it anywhere else):
+
+   ```sh
+   source .secrets.env && printf 'scrawldemo://scrawl?url=%s&token=%s' "https%3A%2F%2Fscrawl-server.<your-subdomain>.workers.dev" "$SCRAWL_TOKEN" | pbcopy
+   ```
+
+2. On the iPhone, in the demo's **Scrawl server** section, tap **Paste** (Universal Clipboard
+   brings the link over). It should say "Sending to" and your server.
+3. Record as before. The strip says "Building…", then "Sending…", then "Sent to your Scrawl
+   server".
+4. Ask your agent "look at my last scrawl", or run
+   `curl -H "Authorization: Bearer $SCRAWL_TOKEN" https://…/bundles`.
+
+**Stop sending** forgets the server; bundles then stay on the iPhone as before.

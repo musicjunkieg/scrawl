@@ -79,7 +79,11 @@ async fn fetch(mut request: Request, env: Env, _ctx: Context) -> Result<Response
         None => url.path().to_owned(),
     };
     let method = request.method();
-    let authorization = request.headers().get("Authorization")?;
+    let authorization = scrawl_server::authorization(
+        &config,
+        request.headers().get("Authorization")?,
+        request.headers().get("X-Scrawl-Token")?,
+    );
     // A wrong token or an upload that says it's too big is turned away before its body is read.
     let length = request
         .headers()
