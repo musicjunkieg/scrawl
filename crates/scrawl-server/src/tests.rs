@@ -239,6 +239,19 @@ fn the_upload_token_sends_bundles_but_reads_nothing() {
     let early = answer_before_body(&both, "POST", "/mcp", Some(&bearer), Some(10));
     assert_eq!(early.map(|r| r.status), Some(403));
     assert!(answer_before_body(&both, "POST", "/bundles", Some(&bearer), Some(10)).is_none());
+    // A POST anywhere else is answered before its body is read, whatever the token.
+    let owner = format!("Bearer {TOKEN}");
+    for (path, header, status) in [
+        ("/health", Some(bearer.as_str()), 403),
+        ("/health", Some(owner.as_str()), 405),
+        ("/health", None, 401),
+        ("/", None, 405),
+        ("/elsewhere", Some(bearer.as_str()), 404),
+    ] {
+        let early = answer_before_body(&both, "POST", path, header, Some(1 << 30));
+        assert_eq!(early.map(|r| r.status), Some(status), "POST {path}");
+    }
+    assert!(answer_before_body(&both, "GET", "/health", Some(&bearer), None).is_none());
     // The token still reads everything, and X-Scrawl-Token can carry the upload token.
     assert_eq!(
         run(handle(
@@ -258,7 +271,6 @@ fn the_upload_token_sends_bundles_but_reads_nothing() {
         "/bundles",
         Some(&bearer)
     ));
-    let owner = format!("Bearer {TOKEN}");
     assert!(!counts_toward_upload_limit(
         &both,
         "POST",

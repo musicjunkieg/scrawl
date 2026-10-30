@@ -187,6 +187,16 @@ pub fn answer_before_body(
     let limit = match parts.first() {
         Some(&"bundles") => config.max_upload,
         Some(&"mcp") => mcp::MAX_MESSAGE,
+        // Nothing else takes a body: answer a POST without reading one, as `handle` would.
+        _ if method == "POST" => {
+            return Some(match parts.as_slice() {
+                ["health"] => authorize(config, authorization, method, &parts)
+                    .err()
+                    .unwrap_or_else(|| Response::error(405, "not allowed here")),
+                [] => Response::error(405, "not allowed here"),
+                _ => Response::error(404, "not found"),
+            });
+        }
         _ => return None,
     };
     if let Err(response) = authorize(config, authorization, method, &parts) {
