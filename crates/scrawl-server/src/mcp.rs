@@ -246,14 +246,17 @@ async fn list_scrawls(limit: usize, store: &impl Store) -> Result<Value, String>
 }
 
 async fn get_scrawl(id: Option<String>, store: &impl Store) -> Result<Value, String> {
+    let asked = id.is_some();
     let entry = match id {
         Some(id) => entry_of(&id, store).await?,
         None => newest(store, 1).await?.into_iter().next(),
     };
     let Some(entry) = entry else {
-        return Ok(tool_error(
-            "There's no such Scrawl recording here; list_scrawls shows what there is.",
-        ));
+        return Ok(tool_error(if asked {
+            "There's no such Scrawl recording here; list_scrawls shows what there is."
+        } else {
+            "No Scrawl recordings have been sent here yet."
+        }));
     };
     let folder = format!("bundles/{}.scrawl", entry.id);
     let mut content = Vec::new();

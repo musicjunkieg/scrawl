@@ -475,6 +475,13 @@ fn an_agent_lists_looks_at_and_opens_a_scrawl() {
             .unwrap()
             .contains("No Scrawl recordings")
     );
+    // Asked for the newest before anything came: says so, not that an id is missing.
+    let empty = call(&store, "get_scrawl", serde_json::json!({}));
+    assert_eq!(empty["isError"], true);
+    assert_eq!(
+        empty["content"][0]["text"],
+        "No Scrawl recordings have been sent here yet."
+    );
     for (id, at) in [("old", 1_761_777_000_000u64), ("new", 1_761_777_060_000)] {
         run(handle(
             &config(),
