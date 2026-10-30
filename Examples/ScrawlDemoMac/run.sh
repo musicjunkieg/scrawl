@@ -15,12 +15,14 @@ cp Info.plist "$app/Contents/"
 # macOS keeps Screen Recording and Microphone permission for an app's signature. An ad-hoc
 # signature changes with every build, so each rebuild would be a new app asking again; a real
 # certificate (Xcode's free "Apple Development" one) keeps the permission across rebuilds.
-# SCRAWL_SIGN names one; otherwise the first Apple Development identity, else ad hoc.
-identity=${SCRAWL_SIGN:-$(security find-identity -v -p codesigning 2>/dev/null |
-  sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -n 1)}
+# SCRAWL_SIGN names one; otherwise the first Apple Development identity, by its SHA-1 so two
+# certificates with the same name (one renewed, one per Mac) aren't ambiguous; else ad hoc.
+found=$(security find-identity -v -p codesigning 2>/dev/null | grep '"Apple Development:' | head -n 1)
+identity=${SCRAWL_SIGN:-$(printf '%s\n' "$found" | sed -n 's/^ *[0-9][0-9]*) \([0-9A-F]\{40\}\) .*/\1/p')}
+name=${SCRAWL_SIGN:-$(printf '%s\n' "$found" | sed -n 's/.*"\(.*\)".*/\1/p')}
 if [ -n "$identity" ]; then
   codesign --force --sign "$identity" "$app"
-  echo "Signed with $identity"
+  echo "Signed with $name"
 else
   codesign --force --sign - "$app"
   echo "No Apple Development certificate (Xcode › Settings › Accounts › Manage Certificates):" >&2
