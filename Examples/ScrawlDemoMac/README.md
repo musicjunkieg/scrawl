@@ -21,8 +21,12 @@ default once ScrawlCore is built).
    ```
 
    It builds the app, wraps it as `Examples/ScrawlDemoMac/.build/ScrawlDemo.app` and opens it, so
-   macOS asks for ScrawlDemo's own permissions. Each rebuild is a new app to macOS, which asks
-   again.
+   macOS asks for ScrawlDemo's own permissions. It signs the app with your "Apple Development"
+   certificate (Xcode › Settings › Accounts › Manage Certificates › + › Apple Development, free),
+   so the permissions stay across rebuilds; `SCRAWL_SIGN="…"` picks another identity. Without one
+   it signs ad hoc, and each rebuild is a new app to macOS, which asks again. Permissions granted
+   to earlier ad-hoc builds can be cleared with `tccutil reset ScreenCapture dev.scrawl.demo.mac`
+   (and `Microphone`).
 
 ## What to try (about 15 minutes)
 
