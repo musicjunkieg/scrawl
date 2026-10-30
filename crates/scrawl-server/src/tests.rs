@@ -666,3 +666,38 @@ fn text_too_large_to_send_points_to_its_download() {
     );
     assert_eq!(file["isError"], true);
 }
+
+/// A store whose every call fails, as R2 can.
+struct BrokenStore;
+
+impl Store for BrokenStore {
+    async fn get(&self, _key: &str) -> Result<Option<Vec<u8>>, String> {
+        Err("R2 is down".into())
+    }
+    async fn put(&self, _key: &str, _bytes: Vec<u8>, _kind: &str) -> Result<(), String> {
+        Err("R2 is down".into())
+    }
+    async fn list(&self, _prefix: &str, _limit: usize) -> Result<Vec<String>, String> {
+        Err("R2 is down".into())
+    }
+}
+
+#[test]
+fn a_storage_failure_is_a_json_rpc_error_for_its_request() {
+    let message = serde_json::json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+        "params": {"name": "list_scrawls", "arguments": {}}});
+    let answer = run(handle(
+        &config(),
+        request("POST", "/mcp", message.to_string().into_bytes()),
+        &BrokenStore,
+    ));
+    assert_eq!(answer.status, 200);
+    assert_eq!(reply(&answer)["id"], 5);
+    assert_eq!(reply(&answer)["error"]["code"], -32603);
+    assert!(
+        reply(&answer)["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("R2 is down")
+    );
+}

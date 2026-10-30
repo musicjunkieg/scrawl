@@ -84,7 +84,10 @@ pub(crate) async fn handle(
         "initialize" => Ok(initialize(&params)),
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": tools() })),
-        "tools/call" => call(&params, store).await?,
+        // A storage failure is still an answer to this request, with its id.
+        "tools/call" => call(&params, store)
+            .await
+            .unwrap_or_else(|error| Err((-32603, format!("Storage error: {error}")))),
         _ => Err((-32601, format!("Method not found: {name}"))),
     };
     Ok(match result {
