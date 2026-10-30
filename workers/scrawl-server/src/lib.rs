@@ -67,6 +67,10 @@ async fn fetch(mut request: Request, env: Env, _ctx: Context) -> Result<Response
             .secret("SCRAWL_TOKEN")
             .map(|s| s.to_string())
             .unwrap_or_default(),
+        upload_token: env
+            .secret("SCRAWL_UPLOAD_TOKEN")
+            .map(|s| s.to_string())
+            .unwrap_or_default(),
         max_upload: env
             .var("MAX_UPLOAD_BYTES")
             .ok()
@@ -97,6 +101,24 @@ async fn fetch(mut request: Request, env: Env, _ctx: Context) -> Result<Response
         length,
     ) {
         return send(reply);
+    }
+    // The upload token, which an app carries, sends at most 20 bundles a minute from one address
+    // (`UPLOADS` in cloudflare.config.ts). Without the binding (another runtime), no limit.
+    if scrawl_server::counts_toward_upload_limit(
+        &config,
+        method.as_ref(),
+        &path,
+        authorization.as_deref(),
+    ) {
+        if let Ok(limiter) = env.rate_limiter("UPLOADS") {
+            let from = request
+                .headers()
+                .get("CF-Connecting-IP")?
+                .unwrap_or_default();
+            if !limiter.limit(from).await?.success {
+                return send(scrawl_server::too_many_uploads());
+            }
+        }
     }
     let body = if method == Method::Post {
         request.bytes().await?

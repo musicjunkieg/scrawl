@@ -13,7 +13,8 @@
 //! - `GET /`: says the receiver is up, without a token.
 //!
 //! Every other request needs `Authorization: Bearer <token>`, or `X-Scrawl-Token: <token>` (see
-//! [`authorization`]).
+//! [`authorization`]). The token reads and sends everything; the upload token, the one an app
+//! carries (anyone can pull it out of the app), only sends bundles and checks itself at `/health`.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -30,6 +31,9 @@ pub const DEFAULT_MAX_UPLOAD: usize = 40 * 1024 * 1024;
 pub struct Config {
     /// The bearer token every request but `GET /` needs. Empty refuses everything.
     pub token: String,
+    /// A second token that can only send bundles (`POST /bundles`, `GET /health`), for apps to
+    /// carry. Empty: none.
+    pub upload_token: String,
     /// The largest upload accepted, in bytes, zipped or unpacked.
     pub max_upload: usize,
 }
@@ -179,12 +183,23 @@ pub fn answer_before_body(
     content_length: Option<u64>,
 ) -> Option<Response> {
     let path = path.split_once('?').map_or(path, |(p, _)| p);
-    let limit = match path.trim_matches('/').split('/').find(|p| !p.is_empty()) {
-        Some("bundles") => config.max_upload,
-        Some("mcp") => mcp::MAX_MESSAGE,
+    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    let limit = match parts.first() {
+        Some(&"bundles") => config.max_upload,
+        Some(&"mcp") => mcp::MAX_MESSAGE,
+        // Nothing else takes a body: answer a POST without reading one, as `handle` would.
+        _ if method == "POST" => {
+            return Some(match parts.as_slice() {
+                ["health"] => authorize(config, authorization, method, &parts)
+                    .err()
+                    .unwrap_or_else(|| Response::error(405, "not allowed here")),
+                [] => Response::error(405, "not allowed here"),
+                _ => Response::error(404, "not found"),
+            });
+        }
         _ => return None,
     };
-    if let Err(response) = authorize(config, authorization) {
+    if let Err(response) = authorize(config, authorization, method, &parts) {
         return Some(response);
     }
     if method != "POST" {
@@ -202,7 +217,7 @@ pub fn answer_before_body(
 
 /// The `Authorization` value to check, from the request's `Authorization` and `X-Scrawl-Token`
 /// headers. ScrawlKit sends both: iOS may drop or replace `Authorization` in a background upload,
-/// since Apple reserves it for the URL loading system, so either one carrying the token is enough.
+/// since Apple reserves it for the URL loading system, so either one carrying a token is enough.
 pub fn authorization(
     config: &Config,
     header: Option<String>,
@@ -210,9 +225,32 @@ pub fn authorization(
 ) -> Option<String> {
     let from_header = scrawl_token.map(|token| format!("Bearer {}", token.trim()));
     match (header, from_header) {
-        (Some(header), Some(other)) if authorize(config, Some(&header)).is_err() => Some(other),
+        (Some(header), Some(other)) if access(config, Some(&header)).is_err() => Some(other),
         (header, other) => header.or(other),
     }
+}
+
+/// Whether this request sends a bundle with the upload token, the one an app carries: what a
+/// front end with a rate limiter counts (`workers/scrawl-server` allows 20 a minute from one
+/// address), so a token pulled out of an app can't fill the bucket quickly. The owner's token
+/// isn't counted.
+pub fn counts_toward_upload_limit(
+    config: &Config,
+    method: &str,
+    path: &str,
+    authorization: Option<&str>,
+) -> bool {
+    let path = path.split_once('?').map_or(path, |(p, _)| p);
+    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    method == "POST"
+        && parts == ["bundles"]
+        && matches!(access(config, authorization), Ok(Access::Upload))
+}
+
+/// The answer once an address has sent more than its share. ScrawlKit's outbox waits and tries
+/// again on a 429.
+pub fn too_many_uploads() -> Response {
+    Response::error(429, "too many uploads from here; try again in a minute")
 }
 
 fn too_big() -> Response {
@@ -245,7 +283,7 @@ pub async fn handle(config: &Config, mut request: Request, store: &impl Store) -
     if parts[0] != "bundles" && parts != ["mcp"] && parts != ["health"] {
         return Response::error(404, "not found");
     }
-    if let Err(response) = authorize(config, request.authorization.as_deref()) {
+    if let Err(response) = authorize(config, request.authorization.as_deref(), method, &parts) {
         return response;
     }
     if parts == ["health"] {
@@ -269,18 +307,49 @@ pub async fn handle(config: &Config, mut request: Request, store: &impl Store) -
     result.unwrap_or_else(Response::storage_failed)
 }
 
-fn authorize(config: &Config, header: Option<&str>) -> Result<(), Response> {
+/// What a token lets its holder do.
+#[derive(Debug, PartialEq)]
+enum Access {
+    Everything,
+    /// Send bundles and check the token, nothing that reads them back.
+    Upload,
+}
+
+fn access(config: &Config, header: Option<&str>) -> Result<Access, Response> {
     if config.token.is_empty() {
         return Err(Response::error(500, "the receiver has no token set"));
     }
     let given = header.and_then(|h| h.strip_prefix("Bearer ")).unwrap_or("");
-    // Compares every byte, so how long it takes doesn't tell how much of a guess was right.
-    let (a, b) = (given.as_bytes(), config.token.as_bytes());
-    let differ = a.len() != b.len() || a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) != 0;
-    if differ {
-        Err(Response::error(401, "wrong or missing token"))
+    if same(given, &config.token) {
+        Ok(Access::Everything)
+    } else if !config.upload_token.is_empty() && same(given, &config.upload_token) {
+        Ok(Access::Upload)
     } else {
-        Ok(())
+        Err(Response::error(401, "wrong or missing token"))
+    }
+}
+
+/// Compares every byte, so how long it takes doesn't tell how much of a guess was right.
+fn same(given: &str, token: &str) -> bool {
+    let (a, b) = (given.as_bytes(), token.as_bytes());
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Whether the token in `header` may make this request (`parts` is the path, split on `/`).
+fn authorize(
+    config: &Config,
+    header: Option<&str>,
+    method: &str,
+    parts: &[&str],
+) -> Result<(), Response> {
+    let uploading = matches!(
+        (method, parts),
+        ("POST", ["bundles"]) | ("GET" | "HEAD", ["health"])
+    );
+    match access(config, header)? {
+        Access::Everything => Ok(()),
+        Access::Upload if uploading => Ok(()),
+        Access::Upload => Err(Response::error(403, "this token can only send bundles")),
     }
 }
 

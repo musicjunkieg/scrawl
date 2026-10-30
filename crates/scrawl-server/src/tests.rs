@@ -16,6 +16,7 @@ const TOKEN: &str = "s3cret-token";
 fn config() -> Config {
     Config {
         token: TOKEN.into(),
+        upload_token: String::new(),
         max_upload: 1 << 20,
     }
 }
@@ -189,11 +190,110 @@ fn every_request_but_the_front_page_needs_the_token() {
     // No token set refuses everything rather than letting anyone in.
     let open = Config {
         token: String::new(),
+        upload_token: String::new(),
         max_upload: 1 << 20,
     };
     let mut sent = request("POST", "/bundles", bundle("web-1", 1_000));
     sent.authorization = Some("Bearer ".into());
     assert_eq!(run(handle(&open, sent, &store)).status, 500);
+}
+
+#[test]
+fn the_upload_token_sends_bundles_but_reads_nothing() {
+    const UPLOAD: &str = "app-upload-token";
+    let both = Config {
+        token: TOKEN.into(),
+        upload_token: UPLOAD.into(),
+        max_upload: 1 << 20,
+    };
+    let store = MemoryStore::default();
+    let with = |method: &str, path: &str, body: Vec<u8>| {
+        let mut sent = request(method, path, body);
+        sent.authorization = Some(format!("Bearer {UPLOAD}"));
+        sent
+    };
+    let sent = run(handle(
+        &both,
+        with("POST", "/bundles", bundle("app-1", 1_000)),
+        &store,
+    ));
+    assert_eq!(sent.status, 200);
+    assert_eq!(reply(&sent)["state"], "saved");
+    assert_eq!(
+        run(handle(&both, with("GET", "/health", vec![]), &store)).status,
+        200
+    );
+    // An app's token, pulled out of the app, opens none of what's been sent.
+    for (method, path) in [
+        ("GET", "/bundles"),
+        ("GET", "/bundles/app-1"),
+        ("GET", "/bundles/app-1/summary.md"),
+        ("POST", "/mcp"),
+    ] {
+        let answer = run(handle(&both, with(method, path, b"{}".to_vec()), &store));
+        assert_eq!(answer.status, 403, "{method} {path}");
+    }
+    let bearer = format!("Bearer {UPLOAD}");
+    let early = answer_before_body(&both, "GET", "/bundles", Some(&bearer), None);
+    assert_eq!(early.map(|r| r.status), Some(403));
+    let early = answer_before_body(&both, "POST", "/mcp", Some(&bearer), Some(10));
+    assert_eq!(early.map(|r| r.status), Some(403));
+    assert!(answer_before_body(&both, "POST", "/bundles", Some(&bearer), Some(10)).is_none());
+    // A POST anywhere else is answered before its body is read, whatever the token.
+    let owner = format!("Bearer {TOKEN}");
+    for (path, header, status) in [
+        ("/health", Some(bearer.as_str()), 403),
+        ("/health", Some(owner.as_str()), 405),
+        ("/health", None, 401),
+        ("/", None, 405),
+        ("/elsewhere", Some(bearer.as_str()), 404),
+    ] {
+        let early = answer_before_body(&both, "POST", path, header, Some(1 << 30));
+        assert_eq!(early.map(|r| r.status), Some(status), "POST {path}");
+    }
+    assert!(answer_before_body(&both, "GET", "/health", Some(&bearer), None).is_none());
+    // The token still reads everything, and X-Scrawl-Token can carry the upload token.
+    assert_eq!(
+        run(handle(
+            &both,
+            request("GET", "/bundles/app-1", vec![]),
+            &store
+        ))
+        .status,
+        200
+    );
+    let given = authorization(&both, Some("Bearer replaced".into()), Some(UPLOAD.into()));
+    assert_eq!(given, Some(bearer.clone()));
+    // Only the upload token's uploads count toward a front end's rate limit.
+    assert!(counts_toward_upload_limit(
+        &both,
+        "POST",
+        "/bundles",
+        Some(&bearer)
+    ));
+    assert!(!counts_toward_upload_limit(
+        &both,
+        "POST",
+        "/bundles",
+        Some(&owner)
+    ));
+    assert!(!counts_toward_upload_limit(
+        &both,
+        "GET",
+        "/health",
+        Some(&bearer)
+    ));
+    assert!(!counts_toward_upload_limit(
+        &both,
+        "POST",
+        "/bundles",
+        Some("Bearer wrong")
+    ));
+    assert_eq!(too_many_uploads().status, 429);
+    // Without an upload token set, it's just a wrong token.
+    let mut sent = with("POST", "/bundles", bundle("app-2", 2_000));
+    sent.authorization = Some(format!("Bearer {UPLOAD}"));
+    assert_eq!(run(handle(&config(), sent, &store)).status, 401);
 }
 
 #[test]
@@ -334,6 +434,7 @@ fn a_bundle_over_the_limit_is_refused() {
     let store = MemoryStore::default();
     let small = Config {
         token: TOKEN.into(),
+        upload_token: String::new(),
         max_upload: 2_000,
     };
     let json = scrawl_json("web-1", 1_000);
@@ -684,6 +785,7 @@ fn text_too_large_to_send_points_to_its_download() {
     );
     let config = Config {
         token: TOKEN.into(),
+        upload_token: String::new(),
         max_upload: 4 << 20,
     };
     let sent = run(handle(
