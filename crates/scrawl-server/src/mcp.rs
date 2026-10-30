@@ -70,7 +70,9 @@ pub(crate) async fn handle(
         // A notification (`notifications/initialized`, a cancel): nothing to answer.
         return Ok(accepted());
     };
-    if !id.is_string() && !id.is_i64() && !id.is_u64() {
+    // A whole number written `1.0` is an integer too, as MCP's schema reads it.
+    let integral = id.is_i64() || id.is_u64() || id.as_f64().is_some_and(|n| n.fract() == 0.0);
+    if !id.is_string() && !integral {
         return Ok(rpc_error(
             Value::Null,
             -32600,
