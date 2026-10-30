@@ -70,6 +70,13 @@ pub(crate) async fn handle(
         // A notification (`notifications/initialized`, a cancel): nothing to answer.
         return Ok(accepted());
     };
+    if !id.is_string() && !id.is_i64() && !id.is_u64() {
+        return Ok(rpc_error(
+            Value::Null,
+            -32600,
+            "Invalid request: id must be a string or integer",
+        ));
+    }
     let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
     let result = match name {
         "initialize" => Ok(initialize(&params)),

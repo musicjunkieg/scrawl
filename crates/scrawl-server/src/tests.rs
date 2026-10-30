@@ -599,6 +599,24 @@ fn messages_must_be_json_rpc_2_0() {
         assert_eq!(reply(&answer)["error"]["code"], -32600);
         assert_eq!(reply(&answer)["id"], 1);
     }
+    // An id is a string or an integer.
+    for id in [
+        serde_json::json!(true),
+        serde_json::json!(1.5),
+        serde_json::Value::Null,
+        serde_json::json!([1]),
+    ] {
+        let answer = rpc(
+            &store,
+            serde_json::json!({"jsonrpc": "2.0", "id": id, "method": "ping"}),
+        );
+        assert_eq!(reply(&answer)["error"]["code"], -32600, "{id}");
+    }
+    let named = rpc(
+        &store,
+        serde_json::json!({"jsonrpc": "2.0", "id": "a1", "method": "ping"}),
+    );
+    assert_eq!(reply(&named)["id"], "a1");
 }
 
 #[test]
