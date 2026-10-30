@@ -1,0 +1,13 @@
+{
+  "name": "scrawl-server-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "cf dev",
+    "deploy": "cf deploy --secrets-file .secrets.env"
+  },
+  "devDependencies": {
+    "cf": "1.0.0-beta.26",
+    "wrangler": "4.156.0"
+  }
+}

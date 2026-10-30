@@ -2,4 +2,6 @@
 /build
 /node_modules
 /.wrangler
+/.cloudflare
 /.dev.vars
+/.secrets.env

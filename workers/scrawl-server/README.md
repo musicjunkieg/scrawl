@@ -7,14 +7,19 @@ folder runs it as a Worker (Rust compiled to wasm with workers-rs).
 ## Deploy it (about 15 minutes the first time)
 
 You need a Cloudflare account, Node, and Rust with the wasm target
-(`rustup target add wasm32-unknown-unknown`). In this folder:
+(`rustup target add wasm32-unknown-unknown`). It deploys with `cf`, Cloudflare's CLI (in beta; it
+runs Wrangler's bundler for the Rust build). In this folder:
 
-1. Sign in: `npx wrangler login`
-2. Make the bucket: `npx wrangler r2 bucket create scrawl-bundles`
-3. Set the token (any long random string; `openssl rand -hex 32` makes one) and keep a copy:
-   `npx wrangler secret put SCRAWL_TOKEN`
-4. Deploy: `npx wrangler deploy`. The first build installs `worker-build` (a few minutes).
+1. Install the tools: `npm install`
+2. Sign in: `npx cf auth login`
+3. Make the token (any long random string) and keep a copy:
+   `echo "SCRAWL_TOKEN=$(openssl rand -hex 32)" > .secrets.env`. Git ignores this file.
+4. Deploy: `npm run deploy`. It uploads the token with the Worker, and makes the
+   `scrawl-bundles` bucket the first time. The first build installs `worker-build` (a few minutes).
 5. Check it: opening `https://scrawl-server.<your-subdomain>.workers.dev/` says `scrawl-server`.
+
+Deploy again with `npm run deploy` after pulling changes; it sends the token from `.secrets.env`
+each time.
 
 ## Use it
 
@@ -28,7 +33,7 @@ curl -H "Authorization: Bearer $TOKEN" https://…/bundles/web-1/summary.md
 ```
 
 The zip holds one `<id>.scrawl/` folder: what `scrawl-web`'s `bundle.zip()` makes, or a bundle
-folder zipped in Finder. Uploads up to 40 MB are taken (`MAX_UPLOAD_BYTES` in `wrangler.toml`): a
+folder zipped in Finder. Uploads up to 40 MB are taken (`MAX_UPLOAD_BYTES` in `cloudflare.config.ts`): a
 Worker has 128 MB of memory and holds an upload about twice while unpacking it. A wrong token,
 a `Content-Length` over the limit, or no `Content-Length` at all, is turned away before the
 upload is read. A token in a public web page isn't
@@ -51,5 +56,5 @@ Its tools are `list_scrawls`, `get_scrawl` (the newest unless given an id) and `
 
 ## Run it on your own machine
 
-`npx wrangler dev` runs it on `workerd`, Cloudflare's open-source runtime, with a local bucket.
+`npm run dev` runs it on `workerd`, Cloudflare's open-source runtime, with a local bucket.
 Put `SCRAWL_TOKEN=…` in `.dev.vars` here first (git ignores it).
