@@ -80,6 +80,7 @@ async fn fetch(mut request: Request, env: Env, _ctx: Context) -> Result<Response
     };
     let method = request.method();
     let authorization = scrawl_server::authorization(
+        &config,
         request.headers().get("Authorization")?,
         request.headers().get("X-Scrawl-Token")?,
     );

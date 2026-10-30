@@ -201,10 +201,18 @@ pub fn answer_before_body(
 }
 
 /// The `Authorization` value to check, from the request's `Authorization` and `X-Scrawl-Token`
-/// headers. ScrawlKit sends both: iOS may drop `Authorization` from a background upload, since
-/// Apple reserves it for the URL loading system.
-pub fn authorization(header: Option<String>, scrawl_token: Option<String>) -> Option<String> {
-    header.or_else(|| scrawl_token.map(|token| format!("Bearer {}", token.trim())))
+/// headers. ScrawlKit sends both: iOS may drop or replace `Authorization` in a background upload,
+/// since Apple reserves it for the URL loading system, so either one carrying the token is enough.
+pub fn authorization(
+    config: &Config,
+    header: Option<String>,
+    scrawl_token: Option<String>,
+) -> Option<String> {
+    let from_header = scrawl_token.map(|token| format!("Bearer {}", token.trim()));
+    match (header, from_header) {
+        (Some(header), Some(other)) if authorize(config, Some(&header)).is_err() => Some(other),
+        (header, other) => header.or(other),
+    }
 }
 
 fn too_big() -> Response {

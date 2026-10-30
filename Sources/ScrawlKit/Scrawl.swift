@@ -1561,7 +1561,9 @@
             return .failure(error)
           }
         }.value
-        background.end()
+        // Held until the bundle is also queued for a receiver (`sendBundle` zips it first), so
+        // iOS doesn't end the app between the build and the upload being saved.
+        defer { background.end() }
         if !recovered { isBuildingOnPhone = false }
         switch built {
         case let .success(bundle):

@@ -208,14 +208,24 @@ fn scrawlkit_checks_its_token_and_may_send_it_in_its_own_header() {
 
     // A background upload whose Authorization iOS dropped still has X-Scrawl-Token.
     let mut sent = request("POST", "/bundles", bundle("phone-1", 1_000));
-    sent.authorization = authorization(None, Some(format!("{TOKEN}\n")));
+    sent.authorization = authorization(&config(), None, Some(format!("{TOKEN}\n")));
     assert_eq!(run(handle(&config(), sent, &store)).status, 200);
-    // Authorization wins when both come.
-    assert_eq!(
-        authorization(Some("Bearer a".into()), Some("b".into())).as_deref(),
-        Some("Bearer a")
-    );
-    assert_eq!(authorization(None, None), None);
+    // One replaced by something else still gets in with the other, before the body too.
+    let bearer = format!("Bearer {TOKEN}");
+    for (header, other) in [
+        (Some("Bearer replaced".to_owned()), Some(TOKEN.to_owned())),
+        (Some(bearer.clone()), Some("wrong".to_owned())),
+    ] {
+        let given = authorization(&config(), header, other);
+        assert_eq!(given.as_deref(), Some(bearer.as_str()));
+        let early = answer_before_body(&config(), "POST", "/bundles", given.as_deref(), Some(10));
+        assert!(early.is_none());
+    }
+    // Neither right: refused.
+    let given = authorization(&config(), Some("Bearer a".into()), Some("b".into()));
+    let early = answer_before_body(&config(), "POST", "/bundles", given.as_deref(), Some(10));
+    assert_eq!(early.map(|r| r.status), Some(401));
+    assert_eq!(authorization(&config(), None, None), None);
 }
 
 #[test]
