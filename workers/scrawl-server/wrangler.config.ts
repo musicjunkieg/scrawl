@@ -3,6 +3,7 @@ import { defineWranglerConfig } from "wrangler/experimental-config";
 
 export default defineWranglerConfig({
 	build: {
-		command: "cargo install -q worker-build@^0.8 && worker-build --release",
+		// Quoted: cmd.exe on Windows would take the ^ as an escape and drop it.
+		command: 'cargo install -q "worker-build@^0.8" && worker-build --release',
 	},
 });

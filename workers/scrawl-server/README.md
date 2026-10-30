@@ -6,9 +6,9 @@ folder runs it as a Worker (Rust compiled to wasm with workers-rs).
 
 ## Deploy it (about 15 minutes the first time)
 
-You need a Cloudflare account, Node with pnpm, and Rust with the wasm target
-(`rustup target add wasm32-unknown-unknown`). It deploys with `cf`, Cloudflare's CLI (in beta; it
-runs Wrangler's bundler for the Rust build). In this folder:
+You need a Cloudflare account, Node 22.23+, 24.22+ or 26.12+ (what `cf` supports) with pnpm, and
+Rust with the wasm target (`rustup target add wasm32-unknown-unknown`). It deploys with `cf`,
+Cloudflare's CLI (in beta; it runs Wrangler's bundler for the Rust build). In this folder:
 
 1. Install the tools: `pnpm install`
 2. Sign in: `pnpm cf auth login`
