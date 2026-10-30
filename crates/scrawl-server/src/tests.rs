@@ -617,6 +617,18 @@ fn messages_must_be_json_rpc_2_0() {
         serde_json::json!({"jsonrpc": "2.0", "id": "a1", "method": "ping"}),
     );
     assert_eq!(reply(&named)["id"], "a1");
+    // A whole number written with a decimal point is an integer too.
+    let whole = run(handle(
+        &config(),
+        request(
+            "POST",
+            "/mcp",
+            br#"{"jsonrpc":"2.0","id":2.0,"method":"ping"}"#.to_vec(),
+        ),
+        &store,
+    ));
+    assert!(reply(&whole).get("error").is_none(), "{whole:?}");
+    assert_eq!(reply(&whole)["id"], 2.0);
 }
 
 #[test]
