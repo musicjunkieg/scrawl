@@ -1,0 +1,22 @@
+# The receiver on Cloudflare Workers: `scrawl-server`'s `handle` with an R2 bucket as its store.
+# Its own workspace (and Cargo.lock), so the app's offline builds never need workers-rs.
+[package]
+name = "scrawl-server-worker"
+version = "0.3.5"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+scrawl-server = { path = "../../crates/scrawl-server" }
+worker = "0.8.7"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+
+[workspace]
