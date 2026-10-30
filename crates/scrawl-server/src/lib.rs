@@ -47,6 +47,9 @@ pub struct Response {
     pub status: u16,
     pub content_type: &'static str,
     pub body: Vec<u8>,
+    /// What went wrong, for the server's own log; never sent, since a storage error can name
+    /// the provider's internals.
+    pub log: Option<String>,
 }
 
 impl Response {
@@ -55,6 +58,15 @@ impl Response {
             status,
             content_type: "application/json",
             body: serde_json::to_vec(value).unwrap_or_default(),
+            log: None,
+        }
+    }
+
+    /// A 500 that says only that storage failed, with the reason kept for the log.
+    fn storage_failed(error: String) -> Self {
+        Self {
+            log: Some(format!("storage: {error}")),
+            ..Self::error(500, "storage failed")
         }
     }
 
@@ -208,6 +220,7 @@ pub async fn handle(config: &Config, mut request: Request, store: &impl Store) -
                 status: 200,
                 content_type: "text/plain; charset=utf-8",
                 body: b"scrawl-server\n".to_vec(),
+                log: None,
             },
             _ => Response::error(405, "not allowed here"),
         };
@@ -221,7 +234,7 @@ pub async fn handle(config: &Config, mut request: Request, store: &impl Store) -
     if parts == ["mcp"] {
         return mcp::handle(method, &body, store)
             .await
-            .unwrap_or_else(|error| Response::error(500, &format!("storage: {error}")));
+            .unwrap_or_else(Response::storage_failed);
     }
     let result = match (method, &parts[1..]) {
         ("POST", []) => upload(config, body, request.now_ms, store).await,
@@ -230,7 +243,7 @@ pub async fn handle(config: &Config, mut request: Request, store: &impl Store) -
         ("GET", [id, file @ ..]) => file_of(id, &file.join("/"), store).await,
         _ => Ok(Response::error(405, "not allowed here")),
     };
-    result.unwrap_or_else(|error| Response::error(500, &format!("storage: {error}")))
+    result.unwrap_or_else(Response::storage_failed)
 }
 
 fn authorize(config: &Config, header: Option<&str>) -> Result<(), Response> {
@@ -437,6 +450,7 @@ async fn entry(id: &str, store: &impl Store) -> Result<Response, String> {
                 status: 200,
                 content_type: "application/json",
                 body: bytes,
+                log: None,
             },
             None => Response::error(404, "no such bundle"),
         },
@@ -453,6 +467,7 @@ async fn file_of(id: &str, path: &str, store: &impl Store) -> Result<Response, S
                 status: 200,
                 content_type: content_type(path),
                 body: bytes,
+                log: None,
             },
             None => Response::error(404, "no such file"),
         },

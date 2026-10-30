@@ -694,10 +694,15 @@ fn a_storage_failure_is_a_json_rpc_error_for_its_request() {
     assert_eq!(answer.status, 200);
     assert_eq!(reply(&answer)["id"], 5);
     assert_eq!(reply(&answer)["error"]["code"], -32603);
-    assert!(
-        reply(&answer)["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("R2 is down")
-    );
+    // The provider's words stay in the log, out of the reply.
+    assert_eq!(reply(&answer)["error"]["message"], "Storage error");
+    assert_eq!(answer.log.as_deref(), Some("storage: R2 is down"));
+    let listed = run(handle(
+        &config(),
+        request("GET", "/bundles", vec![]),
+        &BrokenStore,
+    ));
+    assert_eq!(listed.status, 500);
+    assert!(!String::from_utf8_lossy(&listed.body).contains("R2 is down"));
+    assert_eq!(listed.log.as_deref(), Some("storage: R2 is down"));
 }

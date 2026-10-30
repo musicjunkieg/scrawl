@@ -115,6 +115,9 @@ async fn fetch(mut request: Request, env: Env, _ctx: Context) -> Result<Response
 }
 
 fn send(reply: scrawl_server::Response) -> Result<Response> {
+    if let Some(line) = &reply.log {
+        worker::console_error!("scrawl-server: {line}");
+    }
     let mut response = Response::from_bytes(reply.body)?.with_status(reply.status);
     response
         .headers_mut()

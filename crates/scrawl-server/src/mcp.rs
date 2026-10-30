@@ -80,23 +80,28 @@ pub(crate) async fn handle(
         ));
     }
     let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
+    let mut log = None;
     let result = match name {
         "initialize" => Ok(initialize(&params)),
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": tools() })),
-        // A storage failure is still an answer to this request, with its id.
-        "tools/call" => call(&params, store)
-            .await
-            .unwrap_or_else(|error| Err((-32603, format!("Storage error: {error}")))),
+        // A storage failure is still an answer to this request, with its id; its reason goes to
+        // the log, not to the client.
+        "tools/call" => call(&params, store).await.unwrap_or_else(|error| {
+            log = Some(format!("storage: {error}"));
+            Err((-32603, "Storage error".to_owned()))
+        }),
         _ => Err((-32601, format!("Method not found: {name}"))),
     };
-    Ok(match result {
+    let mut response = match result {
         Ok(result) => Response::json(
             200,
             &json!({ "jsonrpc": "2.0", "id": id, "result": result }),
         ),
         Err((code, text)) => rpc_error(id, code, &text),
-    })
+    };
+    response.log = log;
+    Ok(response)
 }
 
 fn accepted() -> Response {
@@ -104,6 +109,7 @@ fn accepted() -> Response {
         status: 202,
         content_type: "application/json",
         body: Vec::new(),
+        log: None,
     }
 }
 
