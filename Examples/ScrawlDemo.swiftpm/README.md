@@ -49,11 +49,11 @@ The bundles also show in the app's list, each with Share.
 With a `scrawl-server` deployed (`workers/scrawl-server/README.md`), the demo uploads each bundle
 there too, so an agent can fetch it over MCP.
 
-1. On the Mac, in `workers/scrawl-server`, copy a setup link for the demo (it holds the token, so
-   don't paste it anywhere else):
+1. On the Mac, in `workers/scrawl-server`, copy a setup link for the demo. It holds the upload
+   token, which can send bundles but not read them:
 
    ```sh
-   source .secrets.env && printf 'scrawldemo://scrawl?url=%s&token=%s' "https%3A%2F%2Fscrawl-server.<your-subdomain>.workers.dev" "$SCRAWL_TOKEN" | pbcopy
+   source .secrets.env && printf 'scrawldemo://scrawl?url=%s&token=%s' "https%3A%2F%2Fscrawl-server.<your-subdomain>.workers.dev" "$SCRAWL_UPLOAD_TOKEN" | pbcopy
    ```
 
 2. On the iPhone, in the demo's **Scrawl server** section, tap **Paste** (Universal Clipboard

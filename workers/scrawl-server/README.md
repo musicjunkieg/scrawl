@@ -12,10 +12,18 @@ Cloudflare's CLI (in beta; it runs Wrangler's bundler for the Rust build). In th
 
 1. Install the tools: `pnpm install`
 2. Sign in: `pnpm cf auth login`
-3. Make the token (any long random string) and keep a copy:
-   `echo "SCRAWL_TOKEN=$(openssl rand -hex 32)" > .secrets.env`. Git ignores this file.
-4. Deploy: `pnpm run deploy` (not `pnpm deploy`, which is pnpm's own command). It uploads the token with the Worker, and makes the
-   `scrawl-bundles` bucket the first time. The first build installs `worker-build` (a few minutes).
+3. Make the two tokens (long random strings) in `.secrets.env`, which git ignores:
+
+   ```sh
+   printf 'SCRAWL_TOKEN=%s\nSCRAWL_UPLOAD_TOKEN=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > .secrets.env
+   ```
+
+   `SCRAWL_TOKEN` reads and sends everything: keep it for yourself and your agent.
+   `SCRAWL_UPLOAD_TOKEN` can only send bundles: it's the one to put in an app, since anyone can
+   pull a token out of an app, and with it they can add bundles but not read any.
+4. Deploy: `pnpm run deploy` (not `pnpm deploy`, which is pnpm's own command). It uploads both
+   tokens with the Worker, and makes the `scrawl-bundles` bucket the first time. The first build
+   installs `worker-build` (a few minutes).
 5. Check it: opening `https://scrawl-server.<your-subdomain>.workers.dev/` says `scrawl-server`.
 
 Deploy again with `pnpm run deploy` after pulling changes; it sends the token from `.secrets.env`
@@ -23,7 +31,8 @@ each time.
 
 ## Use it
 
-Every request but `GET /` needs `Authorization: Bearer <token>`.
+Every request but `GET /` needs `Authorization: Bearer <token>` (or `X-Scrawl-Token: <token>`).
+The upload token gets `POST /bundles` and `GET /health` only; anything else answers 403.
 
 ```sh
 curl -H "Authorization: Bearer $TOKEN" --data-binary @web-1.scrawl.zip https://…/bundles
@@ -36,8 +45,8 @@ The zip holds one `<id>.scrawl/` folder: what `scrawl-web`'s `bundle.zip()` make
 folder zipped in Finder. Uploads up to 40 MB are taken (`MAX_UPLOAD_BYTES` in `cloudflare.config.ts`): a
 Worker has 128 MB of memory and holds an upload about twice while unpacking it. A wrong token,
 a `Content-Length` over the limit, or no `Content-Length` at all, is turned away before the
-upload is read. A token in a public web page isn't
-secret, so a deployed site should upload through its own backend.
+upload is read. A token in a public web page or a shipped app isn't secret: give those the upload
+token, never `SCRAWL_TOKEN`.
 
 ## Give it to your agent (MCP)
 
@@ -57,4 +66,5 @@ Its tools are `list_scrawls`, `get_scrawl` (the newest unless given an id) and `
 ## Run it on your own machine
 
 `pnpm run dev` runs it on `workerd`, Cloudflare's open-source runtime, with a local bucket.
-Put `SCRAWL_TOKEN=…` in `.dev.vars` here first (git ignores it).
+Put `SCRAWL_TOKEN=…` (and `SCRAWL_UPLOAD_TOKEN=…` to try it) in `.dev.vars` here first (git
+ignores it).

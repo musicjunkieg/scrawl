@@ -535,7 +535,7 @@
       "id": "scrawl-server",
       "group": "delivery",
       "name": "Receiver on Cloudflare Workers",
-      "says": "scrawl-server takes uploaded .scrawl bundles (a zip from scrawl-web, or any built bundle) with a token and keeps them in R2, so a bundle has somewhere to go without the Mac app, and serves them to agents over MCP (list_scrawls, get_scrawl, get_scrawl_file).",
+      "says": "scrawl-server takes uploaded .scrawl bundles (a zip from scrawl-web, or any built bundle) with a token and keeps them in R2, so a bundle has somewhere to go without the Mac app, and serves them to agents over MCP (list_scrawls, get_scrawl, get_scrawl_file). A second, upload-only token is the one apps carry: it sends bundles but reads none.",
       "status": "main",
       "platforms": ["linux"],
       "added": "2026-10-29",

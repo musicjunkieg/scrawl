@@ -97,8 +97,11 @@ still hold bundles for the other hand-offs.
 
 Bundles hold screenshots and voice. The receiver listens on loopback unless configured otherwise,
 needs a token for every request, never logs bundle contents, and keeps bundles under the same
-retention rules as the Mac app (`docs/export-and-retention.md`). A token in a public web page isn't
-secret, so a deployed site should upload through its own backend, which holds the token.
+retention rules as the Mac app (`docs/export-and-retention.md`). A token in a public web page or a
+shipped app isn't secret, so the receiver has two: `SCRAWL_TOKEN` reads and sends everything (the
+owner and their agent), and `SCRAWL_UPLOAD_TOKEN` only sends bundles (`POST /bundles`,
+`GET /health`; anything else is 403), so the one an app carries can add bundles but not read
+anyone's.
 
 ## Order and size
 

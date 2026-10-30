@@ -67,6 +67,10 @@ async fn fetch(mut request: Request, env: Env, _ctx: Context) -> Result<Response
             .secret("SCRAWL_TOKEN")
             .map(|s| s.to_string())
             .unwrap_or_default(),
+        upload_token: env
+            .secret("SCRAWL_UPLOAD_TOKEN")
+            .map(|s| s.to_string())
+            .unwrap_or_default(),
         max_upload: env
             .var("MAX_UPLOAD_BYTES")
             .ok()

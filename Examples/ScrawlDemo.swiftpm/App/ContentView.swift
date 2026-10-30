@@ -16,7 +16,7 @@ struct ContentView: View {
             .font(.callout)
         }
         Section("Something to show") {
-          Button("Tapped \(count) times") {
+          Button(count == 1 ? "Tapped 1 time" : "Tapped \(count) times") {
             count += 1
             Scrawl.event("Counter tapped (\(count))")
           }
