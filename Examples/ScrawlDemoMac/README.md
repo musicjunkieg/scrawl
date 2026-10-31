@@ -50,3 +50,24 @@ default once ScrawlCore is built).
    "Stopped before anything was recorded" instead.)
 
 Bundles are in `~/Library/Application Support/ScrawlKit/dev.scrawl.demo.mac/`.
+
+## Send to your Scrawl server (about 5 minutes)
+
+With a `scrawl-server` deployed (`workers/scrawl-server/README.md`), the demo sends each bundle
+there too, so an agent can fetch it over MCP.
+
+1. In `workers/scrawl-server`, copy a setup link with the upload token (it can send bundles but
+   not read them):
+
+   ```sh
+   source .secrets.env && printf 'scrawldemo://scrawl?url=%s&token=%s' "https%3A%2F%2Fscrawl-server.<your-subdomain>.workers.dev" "$SCRAWL_UPLOAD_TOKEN" | pbcopy
+   ```
+
+2. In the demo, choose Help › Send Recordings to a Scrawl Server. It says where it's sending; the
+   link is kept in the Keychain, so this is once.
+3. Record as before. The bar says "Building the bundle…", "Sending to your Scrawl server…", then
+   "Sent to your Scrawl server". Without a network it keeps the bundle and tries again.
+4. Ask your agent "look at my last scrawl". The agent reads with your own `SCRAWL_TOKEN` (the upload
+   token can't read), added once as in `workers/scrawl-server/README.md` › Give it to your agent.
+
+Help › Stop Sending to … forgets the server; bundles then stay on this Mac.

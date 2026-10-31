@@ -9,3 +9,4 @@
 # Xcode's files for the demo app
 Examples/ScrawlDemo.swiftpm/.swiftpm/
 Examples/ScrawlDemo.swiftpm/.build/
+Examples/ScrawlDemoMac/.build/

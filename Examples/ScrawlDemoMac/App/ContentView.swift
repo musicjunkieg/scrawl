@@ -14,7 +14,7 @@ struct ContentView: View {
       Text("Press ⌃⌥⇧S (or Help › Record with Scrawl) to start. Talk, click around, hold ⇧ and drag to circle things, then press ⌃⌥⇧S again to stop.")
         .fixedSize(horizontal: false, vertical: true)
       HStack {
-        Button("Clicked \(count) times") {
+        Button(count == 1 ? "Clicked 1 time" : "Clicked \(count) times") {
           count += 1
           Scrawl.event("Counter clicked (\(count))")
         }

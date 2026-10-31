@@ -18,7 +18,8 @@
   ///
   /// With `ScrawlCore` (`SCRAWL_CORE=1`) the bundle is built right here (`compiles = .onDevice`,
   /// the default then) and handed to `onBundle`, or shown in the Finder. Without it, the movie
-  /// and its timeline are shown in the Finder for `scrawl import`.
+  /// and its timeline are shown in the Finder for `scrawl import`. With a `receiver` (a
+  /// `scrawl-server`), each bundle built here is sent there too, retried until it lands.
   @MainActor
   @Observable
   public final class Scrawl {
@@ -92,6 +93,20 @@
     public var shortcut: Shortcut = .default
     /// Adds Record with Scrawl (and Mark, Discard) to the app's Help menu.
     public var addsMenuItems = true
+    /// A Scrawl receiver (`scrawl-server`) each bundle built here is also sent to, with its upload
+    /// token. Saved in the Keychain; Help › Send Recordings to a Scrawl Server sets it from a
+    /// setup link on the clipboard. Nil: bundles stay on this Mac.
+    public var receiver: Receiver? = Receiver.saved() {
+      didSet {
+        // The same value again retries a change the Keychain refused.
+        guard receiver != oldValue || !receiverIsSaved else { return }
+        receiverIsSaved = Receiver.save(receiver)
+        if installed { syncOutbox() }
+      }
+    }
+    /// Whether the Keychain took the last change to `receiver`. False: the next launch starts
+    /// with whatever the Keychain held before (another server, or none).
+    public private(set) var receiverIsSaved = true
 
     /// Where recordings and bundles go: `Application Support/ScrawlKit/<bundle id>` (inside the
     /// app's container when it's sandboxed).
@@ -112,6 +127,8 @@
     @ObservationIgnored private var installed = false
     @ObservationIgnored private var monitors: [Any] = []
     @ObservationIgnored private let menuTarget = MenuTarget()
+    /// Sends bundles to `receiver` and retries until each lands; exists only while there is one.
+    @ObservationIgnored private var outbox: Outbox?
     @ObservationIgnored private var recorder: MacScreenRecorder?
     @ObservationIgnored private var overlay: MacOverlay?
     @ObservationIgnored private weak var window: NSWindow?
@@ -149,6 +166,7 @@
       addMenuItems()
       guard !installed else { return }
       installed = true
+      syncOutbox()
       monitors.append(NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
         let passes = MainActor.assumeIsolated { Scrawl.shared.handleKey(event) }
         return passes ? event : nil
@@ -467,7 +485,7 @@
             } else if revealsWhenDone {
               NSWorkspace.shared.activateFileViewerSelecting([bundle])
             }
-            showBriefly("Saved \(bundle.lastPathComponent)")
+            await send(bundle, createdAt: createdAt)
           case let .failure(error):
             print("Scrawl: building the bundle failed: \(error)")
             recordings.append(recording)
@@ -484,6 +502,126 @@
         NSWorkspace.shared.activateFileViewerSelecting([recording.movie, recording.timeline])
       }
       showBriefly("Saved the recording")
+    }
+
+    // MARK: - Receiver
+
+    /// Creates the outbox while there's a receiver (sending what was waiting from earlier
+    /// launches) and stops it when there isn't.
+    private func syncOutbox() {
+      guard let receiver else {
+        outbox?.invalidate()
+        outbox = nil
+        return
+      }
+      let outbox = outbox ?? Outbox(
+        directory: Self.directory.appending(path: "Outbox", directoryHint: .isDirectory),
+        configuration: .default
+      ) { event in
+        Task { @MainActor in Scrawl.shared.handle(event) }
+      }
+      self.outbox = outbox
+      outbox.setCredentials(target: receiver.url, token: receiver.token)
+      // A new receiver or token: what it refused before gets another go.
+      outbox.retryFailed()
+    }
+
+    /// Queues `bundle` for the receiver, if there is one, and says so.
+    private func send(_ bundle: URL, createdAt: Date) async {
+      guard let receiver, let outbox else {
+        showBriefly("Saved \(bundle.lastPathComponent)")
+        return
+      }
+      do {
+        let entry = try await outbox.enqueue(
+          bundle: bundle, target: receiver.url, recordedAt: createdAt.ISO8601Format()
+        )
+        if let failure = entry.failure {
+          handle(.failed(id: entry.id, failure))
+          return
+        }
+        // The receiver may have been removed (and its outbox stopped) while the bundle was zipped;
+        // the entry stays on disk for the next one.
+        guard let current = self.outbox else {
+          showBriefly("Saved \(bundle.lastPathComponent)")
+          return
+        }
+        current.kick(force: true)
+        showBriefly("Sending to your Scrawl server…")
+      } catch {
+        print("Scrawl: the bundle couldn't be queued for the Scrawl server: \(error)")
+        showBriefly("Saved \(bundle.lastPathComponent); it couldn't be queued for your Scrawl server")
+      }
+    }
+
+    private func handle(_ event: Outbox.Event) {
+      switch event {
+      case .sent:
+        showBriefly("Sent to your Scrawl server")
+      case let .failed(_, failure):
+        switch failure {
+        case .unauthorized: showBriefly("Your Scrawl server refused the token; the bundle is kept")
+        case .tooLarge: showBriefly("Too large for your Scrawl server; the bundle is kept")
+        case .rejected: showBriefly("Your Scrawl server refused the bundle; it's kept")
+        }
+      case .started, .progress, .retrying:
+        break
+      }
+    }
+
+    /// Help › Send Recordings to a Scrawl Server: takes a setup link from the clipboard, or
+    /// forgets the receiver.
+    fileprivate func toggleReceiver() {
+      if let receiver {
+        self.receiver = nil
+        if receiverIsSaved {
+          alert("Recordings stay on this Mac", detail: "They're no longer sent to \(receiver.url.host() ?? "your Scrawl server").")
+        } else {
+          alert(
+            "Stopped sending for now",
+            detail: "The Keychain wouldn't forget \(receiver.url.host() ?? "the server"), so sending may start again next time the app opens. Remove “dev.kitlangton.scrawl.receiver” in Keychain Access to stop it for good."
+          )
+        }
+        return
+      }
+      guard let link = NSPasteboard.general.string(forType: .string), let found = Receiver(setupLink: link) else {
+        alert(
+          "Copy a Scrawl server setup link first",
+          detail: "It looks like app://scrawl?url=https%3A%2F%2F…&token=…, made with your server's upload token (an https address)."
+        )
+        return
+      }
+      let confirm = NSAlert()
+      confirm.messageText = "Send recordings to \(found.url.host() ?? "this Scrawl server")?"
+      confirm.informativeText = "Each bundle built here is sent there too, until you choose Stop Sending in the Help menu."
+      confirm.addButton(withTitle: "Send")
+      confirm.addButton(withTitle: "Cancel")
+      guard confirm.runModal() == .alertFirstButtonReturn else { return }
+      receiver = found
+      if !receiverIsSaved {
+        if let previous = Receiver.saved(), previous != found {
+          alert(
+            "Sending until the app quits",
+            detail: "The Keychain wouldn't take the new server and still holds \(previous.url.host() ?? "the one before"), so the app sends there again next time it opens. Remove “dev.kitlangton.scrawl.receiver” in Keychain Access to stop that."
+          )
+        } else {
+          alert(
+            "Sending until the app quits",
+            detail: "The Keychain wouldn't keep the server. Next time the app opens, check the Help menu and choose it again."
+          )
+        }
+      }
+    }
+
+    private func alert(_ text: String, detail: String) {
+      let alert = NSAlert()
+      alert.messageText = text
+      alert.informativeText = detail
+      alert.runModal()
+    }
+
+    fileprivate var receiverMenuTitle: String {
+      receiver.map { "Stop Sending to \($0.url.host() ?? "the Scrawl Server")" } ?? "Send Recordings to a Scrawl Server"
     }
 
     /// Shows `text` on the overlay for a moment, then hides it.
@@ -626,7 +764,8 @@
       record.keyEquivalentModifierMask = shortcut.modifiers
       let mark = NSMenuItem(title: "Mark This Moment", action: #selector(MenuTarget.mark(_:)), keyEquivalent: "")
       let discard = NSMenuItem(title: "Discard Scrawl Recording", action: #selector(MenuTarget.discard(_:)), keyEquivalent: "")
-      for item in [separator, record, mark, discard] {
+      let receiver = NSMenuItem(title: receiverMenuTitle, action: #selector(MenuTarget.receiver(_:)), keyEquivalent: "")
+      for item in [separator, record, mark, discard, receiver] {
         item.tag = Self.menuTag
         item.target = menuTarget
         menu.addItem(item)
@@ -700,6 +839,10 @@
       MainActor.assumeIsolated { Scrawl.shared.discard() }
     }
 
+    @objc func receiver(_: Any?) {
+      MainActor.assumeIsolated { Scrawl.shared.toggleReceiver() }
+    }
+
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
       MainActor.assumeIsolated {
         let scrawl = Scrawl.shared
@@ -709,6 +852,9 @@
           return !scrawl.isFinishing
         case #selector(mark(_:)), #selector(discard(_:)):
           return scrawl.isRecording
+        case #selector(receiver(_:)):
+          item.title = scrawl.receiverMenuTitle
+          return !scrawl.isRecording && !scrawl.isStarting
         default:
           return true
         }

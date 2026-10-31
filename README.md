@@ -456,7 +456,10 @@ entitlement in a sandboxed app).
 With ScrawlCore (built as for iOS), each recording becomes
 `Application Support/ScrawlKit/<bundle id>/<stamp>.scrawl`, transcribed offline when the Info.plist
 has `NSSpeechRecognitionUsageDescription`, and goes to `Scrawl.shared.onBundle` or the Finder.
-Without it, the movie and its timeline are shown in the Finder for `scrawl import`; sending them
+With `Scrawl.shared.receiver` (a `scrawl-server` URL and its upload token, kept in the Keychain;
+Help › Send Recordings to a Scrawl Server sets it from a setup link on the clipboard), each bundle
+is also sent there: a network failure is retried, and a refusal (a wrong token, too large) is
+kept on the Mac until the receiver is set again. Without ScrawlCore, the movie and its timeline are shown in the Finder for `scrawl import`; sending them
 straight to the Scrawl app is next. `Scrawl.screen(_:)`, `Scrawl.context(_:_:)` and their view
 modifiers work as on iOS. `Examples/ScrawlDemoMac` is a small app to try it (its README has the
 steps).

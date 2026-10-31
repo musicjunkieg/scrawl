@@ -1,7 +1,8 @@
 # A self-hostable receiver: "and your agent gets the bundle", without the Mac app
 
 Status: R1 and R3 built (2026-10-29): `crates/scrawl-server` and `workers/scrawl-server`, with
-MCP at `/mcp`. R5's upload from ScrawlKit on the iPhone built (2026-10-30); the rest is planned. It follows phase 8 (`scrawl-ffi`) in `docs/library.md`.
+MCP at `/mcp`. R5's upload from ScrawlKit built for the iPhone (2026-10-30) and the Mac
+(2026-10-31); the rest is planned. It follows phase 8 (`scrawl-ffi`) in `docs/library.md`.
 
 ## Why
 
@@ -56,8 +57,10 @@ still hold bundles for the other hand-offs.
      `/ingest`, retried in the background like a hosted recording. The receiver's
      `{state: "saved"}` reads as "Sent to your Scrawl server". The token also goes in
      `X-Scrawl-Token`, since iOS may drop `Authorization` from a background upload, and
-     `GET /health` answers ScrawlKit's token check. Still to do: ScrawlKit for Mac (no pairing
-     yet), and the Mac app accepting a built bundle, so both receivers take both.
+     `GET /health` answers ScrawlKit's token check. ScrawlKit for Mac does the same with
+     `Scrawl.shared.receiver` (Help › Send Recordings to a Scrawl Server takes the setup link from
+     the clipboard and keeps it in the Keychain), through an outbox on a regular session. Still to
+     do: the Mac app accepting a built bundle, so both receivers take both.
 2. **`scrawl-server`** (the receiver). `crates/scrawl-server` holds all of it with no OS bindings:
    `handle(config, request, store)` reads and writes through a `Store` trait. It runs as a
    Cloudflare Worker (`workers/scrawl-server`, workers-rs compiled to wasm, bundles in R2), and
@@ -113,7 +116,7 @@ anyone's. On Workers its uploads are limited to 20 a minute from one address (a 
 | R2 | `scrawl-web` `bundle.send`, against R1 in the browser test | 0.5 day |
 | R3 | MCP hand-off at `/mcp` on the receiver (done) | 1 day |
 | R4 | OpenCode hand-off through `scrawl-route`, webhook | 1 day |
-| R5 | ScrawlKit upload of on-device bundles (iPhone done), Mac app accepts built bundles | 1 day |
+| R5 | ScrawlKit upload of on-device bundles (iPhone and Mac done), Mac app accepts built bundles | 1 day |
 
 ## Decisions (2026-10-29)
 
