@@ -99,12 +99,13 @@
     public var receiver: Receiver? = Receiver.saved() {
       didSet {
         guard receiver != oldValue else { return }
-        savedReceiver = Receiver.save(receiver)
+        receiverIsSaved = Receiver.save(receiver)
         if installed { syncOutbox() }
       }
     }
-    /// Whether the Keychain took the last change to `receiver`.
-    @ObservationIgnored private var savedReceiver = true
+    /// Whether the Keychain took the last change to `receiver`. False: the next launch starts
+    /// with whatever the Keychain held before (another server, or none).
+    public private(set) var receiverIsSaved = true
 
     /// Where recordings and bundles go: `Application Support/ScrawlKit/<bundle id>` (inside the
     /// app's container when it's sandboxed).
@@ -572,7 +573,7 @@
     fileprivate func toggleReceiver() {
       if let receiver {
         self.receiver = nil
-        if savedReceiver {
+        if receiverIsSaved {
           alert("Recordings stay on this Mac", detail: "They're no longer sent to \(receiver.url.host() ?? "your Scrawl server").")
         } else {
           alert(
@@ -596,8 +597,11 @@
       confirm.addButton(withTitle: "Cancel")
       guard confirm.runModal() == .alertFirstButtonReturn else { return }
       receiver = found
-      if !savedReceiver {
-        alert("Sending until the app quits", detail: "The Keychain wouldn't keep the server, so choose it again next time.")
+      if !receiverIsSaved {
+        alert(
+          "Sending until the app quits",
+          detail: "The Keychain wouldn't keep the server. Next time the app opens, check the Help menu and choose it again."
+        )
       }
     }
 
