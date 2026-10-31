@@ -6,8 +6,8 @@
     /// A Scrawl receiver (`scrawl-server`, `docs/receiver.md`) that each bundle built here is also
     /// sent to, with its upload token. Kept in the Keychain, one per app.
     public struct Receiver: Codable, Equatable, Sendable {
-      public var url: URL
-      public var token: String
+      public let url: URL
+      public let token: String
 
       /// Nil unless `url` is HTTPS (plain HTTP only to this Mac, for testing a receiver run here)
       /// and the token isn't empty: the token and the recordings would otherwise go in the clear.
@@ -16,6 +16,20 @@
         guard Self.isSafe(url), !token.isEmpty else { return nil }
         self.url = url
         self.token = token
+      }
+
+      private enum CodingKeys: String, CodingKey { case url, token }
+
+      /// A saved receiver passes the same checks as a new one, or doesn't load.
+      public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let url = try values.decode(URL.self, forKey: .url)
+        guard let receiver = Receiver(url: url, token: try values.decode(String.self, forKey: .token)) else {
+          throw DecodingError.dataCorruptedError(
+            forKey: .url, in: values, debugDescription: "Not an HTTPS receiver with a token"
+          )
+        }
+        self = receiver
       }
 
       static func isSafe(_ url: URL) -> Bool {

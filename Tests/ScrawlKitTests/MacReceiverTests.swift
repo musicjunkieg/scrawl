@@ -19,6 +19,13 @@
       #expect(Scrawl.Receiver(url: URL(string: "https://a.example")!, token: " ") == nil)
     }
 
+    @Test func aSavedReceiverIsCheckedAgainWhenRead() throws {
+      let saved = try JSONEncoder().encode(try #require(Scrawl.Receiver(url: URL(string: "https://a.example")!, token: "t")))
+      #expect(try JSONDecoder().decode(Scrawl.Receiver.self, from: saved).token == "t")
+      let tampered = Data(#"{"url":"http://a.example","token":"t"}"#.utf8)
+      #expect(throws: DecodingError.self) { try JSONDecoder().decode(Scrawl.Receiver.self, from: tampered) }
+    }
+
     @Test func anythingElseIsNoReceiver() {
       for text in [
         "",
