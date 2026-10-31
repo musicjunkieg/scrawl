@@ -67,6 +67,7 @@ there too, so an agent can fetch it over MCP.
    link is kept in the Keychain, so this is once.
 3. Record as before. The bar says "Building the bundle…", "Sending to your Scrawl server…", then
    "Sent to your Scrawl server". Without a network it keeps the bundle and tries again.
-4. Ask your agent "look at my last scrawl".
+4. Ask your agent "look at my last scrawl". The agent reads with your own `SCRAWL_TOKEN` (the upload
+   token can't read), added once as in `workers/scrawl-server/README.md` › Give it to your agent.
 
 Help › Stop Sending to … forgets the server; bundles then stay on this Mac.

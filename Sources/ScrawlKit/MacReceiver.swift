@@ -9,9 +9,22 @@
       public var url: URL
       public var token: String
 
-      public init(url: URL, token: String) {
+      /// Nil unless `url` is HTTPS (plain HTTP only to this Mac, for testing a receiver run here)
+      /// and the token isn't empty: the token and the recordings would otherwise go in the clear.
+      public init?(url: URL, token: String) {
+        let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.isSafe(url), !token.isEmpty else { return nil }
         self.url = url
-        self.token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.token = token
+      }
+
+      static func isSafe(_ url: URL) -> Bool {
+        guard let host = url.host()?.lowercased(), !host.isEmpty else { return false }
+        switch url.scheme?.lowercased() {
+        case "https": return true
+        case "http": return ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host)
+        default: return false
+        }
       }
 
       /// From a setup link, `<scheme>://scrawl?url=<https base>&token=<upload token>`, the same
@@ -22,10 +35,7 @@
               let items = components.queryItems,
               let raw = items.first(where: { $0.name == "url" })?.value,
               let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)),
-              let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http",
-              url.host() != nil,
-              let token = items.first(where: { $0.name == "token" })?.value,
-              !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              let token = items.first(where: { $0.name == "token" })?.value
         else { return nil }
         self.init(url: url, token: token)
       }
@@ -48,21 +58,29 @@
         return try? JSONDecoder().decode(Receiver.self, from: data)
       }
 
-      /// Saves `receiver` for this app, or forgets it (nil).
-      static func save(_ receiver: Receiver?) {
+      /// Saves `receiver` for this app, or forgets it (nil). False when the Keychain refused, so a
+      /// server the person stopped sending to could come back at the next launch.
+      @discardableResult
+      static func save(_ receiver: Receiver?) -> Bool {
         let item: [String: Any] = [
           kSecClass as String: kSecClassGenericPassword,
           kSecAttrService as String: service,
           kSecAttrAccount as String: account,
         ]
-        SecItemDelete(item as CFDictionary)
-        guard let receiver, let data = try? JSONEncoder().encode(receiver) else { return }
+        let deleted = SecItemDelete(item as CFDictionary)
+        guard deleted == errSecSuccess || deleted == errSecItemNotFound else {
+          print("Scrawl: the Scrawl server couldn't be removed from the Keychain (\(deleted))")
+          return false
+        }
+        guard let receiver, let data = try? JSONEncoder().encode(receiver) else { return receiver == nil }
         var adding = item
         adding[kSecValueData as String] = data
         let status = SecItemAdd(adding as CFDictionary, nil)
-        if status != errSecSuccess {
+        guard status == errSecSuccess else {
           print("Scrawl: the Scrawl server couldn't be saved in the Keychain (\(status))")
+          return false
         }
+        return true
       }
     }
   }

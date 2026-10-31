@@ -99,10 +99,12 @@
     public var receiver: Receiver? = Receiver.saved() {
       didSet {
         guard receiver != oldValue else { return }
-        Receiver.save(receiver)
+        savedReceiver = Receiver.save(receiver)
         if installed { syncOutbox() }
       }
     }
+    /// Whether the Keychain took the last change to `receiver`.
+    @ObservationIgnored private var savedReceiver = true
 
     /// Where recordings and bundles go: `Application Support/ScrawlKit/<bundle id>` (inside the
     /// app's container when it's sandboxed).
@@ -536,7 +538,13 @@
           handle(.failed(id: entry.id, failure))
           return
         }
-        outbox.kick(force: true)
+        // The receiver may have been removed (and its outbox stopped) while the bundle was zipped;
+        // the entry stays on disk for the next one.
+        guard let current = self.outbox else {
+          showBriefly("Saved \(bundle.lastPathComponent)")
+          return
+        }
+        current.kick(force: true)
         showBriefly("Sending to your Scrawl server…")
       } catch {
         print("Scrawl: the bundle couldn't be queued for the Scrawl server: \(error)")
@@ -564,18 +572,33 @@
     fileprivate func toggleReceiver() {
       if let receiver {
         self.receiver = nil
-        alert("Recordings stay on this Mac", detail: "They're no longer sent to \(receiver.url.host() ?? "your Scrawl server").")
+        if savedReceiver {
+          alert("Recordings stay on this Mac", detail: "They're no longer sent to \(receiver.url.host() ?? "your Scrawl server").")
+        } else {
+          alert(
+            "Stopped sending for now",
+            detail: "The Keychain wouldn't forget \(receiver.url.host() ?? "the server"), so sending may start again next time the app opens. Remove “dev.kitlangton.scrawl.receiver” in Keychain Access to stop it for good."
+          )
+        }
         return
       }
       guard let link = NSPasteboard.general.string(forType: .string), let found = Receiver(setupLink: link) else {
         alert(
           "Copy a Scrawl server setup link first",
-          detail: "It looks like app://scrawl?url=https%3A%2F%2F…&token=…, made with your server's upload token."
+          detail: "It looks like app://scrawl?url=https%3A%2F%2F…&token=…, made with your server's upload token (an https address)."
         )
         return
       }
+      let confirm = NSAlert()
+      confirm.messageText = "Send recordings to \(found.url.host() ?? "this Scrawl server")?"
+      confirm.informativeText = "Each bundle built here is sent there too, until you choose Stop Sending in the Help menu."
+      confirm.addButton(withTitle: "Send")
+      confirm.addButton(withTitle: "Cancel")
+      guard confirm.runModal() == .alertFirstButtonReturn else { return }
       receiver = found
-      alert("Sending recordings to \(found.url.host() ?? "your Scrawl server")", detail: "Each bundle built here is sent there too.")
+      if !savedReceiver {
+        alert("Sending until the app quits", detail: "The Keychain wouldn't keep the server, so choose it again next time.")
+      }
     }
 
     private func alert(_ text: String, detail: String) {
