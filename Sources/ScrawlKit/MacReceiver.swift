@@ -81,12 +81,21 @@
           kSecAttrService as String: service,
           kSecAttrAccount as String: account,
         ]
-        let deleted = SecItemDelete(item as CFDictionary)
-        guard deleted == errSecSuccess || deleted == errSecItemNotFound else {
-          print("Scrawl: the Scrawl server couldn't be removed from the Keychain (\(deleted))")
-          return false
+        guard let receiver else {
+          let deleted = SecItemDelete(item as CFDictionary)
+          guard deleted == errSecSuccess || deleted == errSecItemNotFound else {
+            print("Scrawl: the Scrawl server couldn't be removed from the Keychain (\(deleted))")
+            return false
+          }
+          return true
         }
-        guard let receiver, let data = try? JSONEncoder().encode(receiver) else { return receiver == nil }
+        guard let data = try? JSONEncoder().encode(receiver) else { return false }
+        // Replaced in place, so a refused save keeps the server saved before.
+        let updated = SecItemUpdate(item as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        guard updated == errSecItemNotFound else {
+          if updated != errSecSuccess { print("Scrawl: the Scrawl server couldn't be saved in the Keychain (\(updated))") }
+          return updated == errSecSuccess
+        }
         var adding = item
         adding[kSecValueData as String] = data
         let status = SecItemAdd(adding as CFDictionary, nil)
