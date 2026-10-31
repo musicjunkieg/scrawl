@@ -98,7 +98,8 @@
     /// setup link on the clipboard. Nil: bundles stay on this Mac.
     public var receiver: Receiver? = Receiver.saved() {
       didSet {
-        guard receiver != oldValue else { return }
+        // The same value again retries a change the Keychain refused.
+        guard receiver != oldValue || !receiverIsSaved else { return }
         receiverIsSaved = Receiver.save(receiver)
         if installed { syncOutbox() }
       }
@@ -598,10 +599,17 @@
       guard confirm.runModal() == .alertFirstButtonReturn else { return }
       receiver = found
       if !receiverIsSaved {
-        alert(
-          "Sending until the app quits",
-          detail: "The Keychain wouldn't keep the server. Next time the app opens, check the Help menu and choose it again."
-        )
+        if let previous = Receiver.saved(), previous != found {
+          alert(
+            "Sending until the app quits",
+            detail: "The Keychain wouldn't take the new server and still holds \(previous.url.host() ?? "the one before"), so the app sends there again next time it opens. Remove “dev.kitlangton.scrawl.receiver” in Keychain Access to stop that."
+          )
+        } else {
+          alert(
+            "Sending until the app quits",
+            detail: "The Keychain wouldn't keep the server. Next time the app opens, check the Help menu and choose it again."
+          )
+        }
       }
     }
 
