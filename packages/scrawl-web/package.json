@@ -11,7 +11,11 @@
   "type": "module",
   "exports": {
     ".": "./src/index.js",
-    "./worker": "./src/worker.js"
+    "./worker": "./src/worker.js",
+    "./relay": {
+      "types": "./src/relay.d.ts",
+      "default": "./src/relay.js"
+    }
   },
   "types": "./src/index.d.ts",
   "files": ["src", "wasm"],

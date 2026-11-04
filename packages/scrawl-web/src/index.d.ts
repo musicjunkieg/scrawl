@@ -46,6 +46,19 @@ export interface ScrawlBundle {
   file(name: string): Uint8Array | undefined;
   /** The bundle as one `.zip` with a `<id>.scrawl/` folder inside. */
   zip(): Blob;
+  /**
+   * POSTs the zip (`application/zip`) to `url`, your backend, which passes it on to a scrawl-server
+   * with `relayBundle` from `scrawl-web/relay` (the receiver answers no CORS, and its token stays
+   * on your server). Resolves with the receiver's reply; a refusal throws, with `status` and
+   * `reply` on the error.
+   */
+  send(options: {
+    url: string | URL;
+    /** Sent as `Authorization: Bearer`, for a backend of your own that wants one. */
+    token?: string;
+    headers?: Record<string, string>;
+    signal?: AbortSignal;
+  }): Promise<{ ok: boolean; delivered?: boolean; state?: string; id?: string; error?: string }>;
 }
 
 export interface Scrawl {

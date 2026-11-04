@@ -13,9 +13,28 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
 
+import { relayBundle } from "../../src/relay.js";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const types = { ".html": "text/html", ".js": "text/javascript", ".wasm": "application/wasm" };
+// A stand-in for scrawl-server's POST /bundles, which the page's backend relays to.
+const received = [];
+const receiver = async (url, init) => {
+  const request = new Request(url, init);
+  received.push({ url: request.url, auth: request.headers.get("authorization"), body: Buffer.from(await request.arrayBuffer()) });
+  return Response.json({ ok: true, delivered: false, state: "saved", id: "web" });
+};
+// The page's backend: `bundle.send({ url: "/api/scrawl" })` posts here.
+async function relay(req, res) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const request = new Request(`http://x${req.url}`, { method: req.method, headers: req.headers, body: Buffer.concat(chunks) });
+  const reply = await relayBundle(request, { url: "https://receiver.example", token: "up-test", fetch: receiver });
+  res.writeHead(reply.status, { "Content-Type": reply.headers.get("content-type") });
+  res.end(Buffer.from(await reply.arrayBuffer()));
+}
 const server = createServer((req, res) => {
+  if (req.method === "POST" && req.url === "/api/scrawl") return void relay(req, res);
   const path = join(root, decodeURIComponent(new URL(req.url, "http://x").pathname));
   let body;
   try {
@@ -119,7 +138,8 @@ try {
   const bundle = await page.evaluate(async () => {
     const b = await window.scrawl.stop();
     const toBase64 = (bytes) => btoa(Array.from(bytes, (c) => String.fromCharCode(c)).join(""));
-    return { id: b.id, summary: b.summary, manifest: b.manifest, files: b.files.map(([n, bytes]) => [n, toBase64(bytes)]), zip: toBase64(new Uint8Array(await b.zip().arrayBuffer())) };
+    const sent = await b.send({ url: "/api/scrawl" });
+    return { id: b.id, summary: b.summary, manifest: b.manifest, files: b.files.map(([n, bytes]) => [n, toBase64(bytes)]), zip: toBase64(new Uint8Array(await b.zip().arrayBuffer())), sent };
   });
   const ms = Date.now() - started;
   const out = process.argv[2] ? resolve(process.argv[2]) : mkdtempSync(join(tmpdir(), "scrawl-web-"));
@@ -128,6 +148,13 @@ try {
     writeFileSync(join(out, name), Buffer.from(b64, "base64"));
   }
   writeFileSync(join(out, `${bundle.id}.scrawl.zip`), Buffer.from(bundle.zip, "base64"));
+
+  // bundle.send went through the page's backend to the receiver, with the token added there.
+  assert.equal(bundle.sent.state, "saved", JSON.stringify(bundle.sent));
+  assert.equal(received.length, 1);
+  assert.equal(received[0].url, "https://receiver.example/bundles");
+  assert.equal(received[0].auth, "Bearer up-test");
+  assert.ok(received[0].body.equals(Buffer.from(bundle.zip, "base64")), "the receiver got the bundle's zip");
 
   const m = bundle.manifest;
   assert.equal(m.source, "web");

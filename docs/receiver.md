@@ -48,8 +48,10 @@ still hold bundles for the other hand-offs.
 ## The pieces
 
 1. **Upload from the recorders** (small).
-   - `scrawl-web`: `bundle.send({ url, token, session? })` posts the zip (`application/zip`,
-     `Authorization: Bearer <token>`) and resolves with the receiver's reply. The page decides
+   - `scrawl-web`: `bundle.send({ url })` posts the zip (`application/zip`) to the page's own
+     backend and resolves with the receiver's reply (a refusal throws, with `status` and `reply`).
+     The backend passes it on with `relayBundle` from `scrawl-web/relay`, which adds the upload
+     token, so the token never reaches the page and the receiver needs no CORS. The page decides
      whether to call it; nothing is sent otherwise, as today.
    - ScrawlKit (built for the iPhone): with `compiles = .onDevice` and a setup link to an HTTPS
      receiver, the finished bundle is zipped (`BundleZip`, stored, one `<id>.scrawl/` folder) into
@@ -113,7 +115,7 @@ anyone's. On Workers its uploads are limited to 20 a minute from one address (a 
 | Step | What | Rough size |
 |---|---|---|
 | R1 | `scrawl-server`: `POST /bundles`, storage, list, ingest-shaped reply, tests with a memory store; the Worker on R2 (done) | 2 days |
-| R2 | `scrawl-web` `bundle.send`, against R1 in the browser test | 0.5 day |
+| R2 | `scrawl-web` `bundle.send` and `relayBundle` for the page's backend, in the browser test (done) | 0.5 day |
 | R3 | MCP hand-off at `/mcp` on the receiver (done) | 1 day |
 | R4 | OpenCode hand-off through `scrawl-route`, webhook | 1 day |
 | R5 | ScrawlKit upload of on-device bundles (iPhone and Mac done), Mac app accepts built bundles | 1 day |

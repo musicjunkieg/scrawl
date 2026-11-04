@@ -47,7 +47,8 @@ Worker has 128 MB of memory and holds an upload about twice while unpacking it. 
 a `Content-Length` over the limit, or no `Content-Length` at all, is turned away before the
 upload is read. A token in a shipped app isn't secret: give an app the upload token, never
 `SCRAWL_TOKEN`. A web page can't upload here directly (the receiver answers no CORS preflight), so
-a site uploads through its own backend, which holds the token. Anyone who pulls the upload token
+a site uploads through its own backend, which holds the token: `bundle.send` posts to it and
+`relayBundle` from `scrawl-web/relay` passes the zip on (see `packages/scrawl-web/README.md`). Anyone who pulls the upload token
 out of an app can add bundles, though not read them. So uploads with the upload token are limited
 to 20 a minute from one address (`UPLOADS` in `cloudflare.config.ts`; past it the receiver answers
 429, which ScrawlKit waits out and retries). If a token is misused anyway, set a new

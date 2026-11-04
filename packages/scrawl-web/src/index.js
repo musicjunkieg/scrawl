@@ -14,6 +14,7 @@ import { recordInput } from "./input.js";
 import { watchPage } from "./context.js";
 import { missingTranscript, normalizeTranscript } from "./transcript.js";
 import { listen } from "./webspeech.js";
+import { sendZip } from "./send.js";
 import { zip } from "./zip.js";
 
 export { compileFrames, decodeFrame } from "./compile.js";
@@ -232,6 +233,7 @@ function compileInWorker(url, capture, frames) {
 
 /** What `stop()` hands back. */
 function bundleOf(id, { files, summary, manifest }, audio) {
+  const zipped = () => new Blob([zip(files, `${id}.scrawl`)], { type: "application/zip" });
   return {
     id,
     /** `[path, bytes]` for every file, `summary.md` last. */
@@ -242,6 +244,8 @@ function bundleOf(id, { files, summary, manifest }, audio) {
     audio,
     file: (name) => files.find(([n]) => n === name)?.[1],
     /** The bundle as one `.zip` (a `<id>.scrawl/` folder inside). */
-    zip: () => new Blob([zip(files, `${id}.scrawl`)], { type: "application/zip" }),
+    zip: zipped,
+    /** POSTs the zip to your backend, which passes it on to a scrawl-server (`relayBundle`). */
+    send: (options) => sendZip(zipped(), options),
   };
 }
