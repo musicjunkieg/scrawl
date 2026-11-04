@@ -1,7 +1,7 @@
 // A test page for scrawl-web's bundle.send: records itself, posts the bundle to /api/scrawl, and
 // this server passes it on to your scrawl-server with relayBundle, the way a site's backend would.
 //   SCRAWL_URL=https://scrawl-server.you.workers.dev SCRAWL_UPLOAD_TOKEN=… node server.mjs
-// Then open http://localhost:8788 in Chrome. Listens on this Mac only.
+// Then open http://127.0.0.1:8788 in Chrome. Listens on this Mac only.
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
@@ -55,4 +55,4 @@ createServer((req, res) => {
   }
   res.writeHead(200, { "Content-Type": types[extname(file)] || "application/octet-stream" });
   res.end(body);
-}).listen(8788, "127.0.0.1", () => console.log(`Open http://localhost:8788 in Chrome (sending to ${url})`));
+}).listen(8788, "127.0.0.1", () => console.log(`Open http://127.0.0.1:8788 in Chrome (sending to ${url}). Ctrl-C stops it.`));
