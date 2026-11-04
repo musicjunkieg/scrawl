@@ -110,6 +110,7 @@ fn accepted() -> Response {
         content_type: "application/json",
         body: Vec::new(),
         log: None,
+        saved: None,
     }
 }
 

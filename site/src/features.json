@@ -542,6 +542,16 @@
       "docs": ["docs/receiver.md", "workers/scrawl-server/README.md"]
     },
     {
+      "id": "scrawl-server-webhook",
+      "group": "delivery",
+      "name": "Webhook for new recordings",
+      "says": "With SCRAWL_WEBHOOK_URL set, scrawl-server POSTs each new bundle's id, link and summary to that https address (Slack and Discord show its text), signed with SCRAWL_WEBHOOK_SECRET and tried three times.",
+      "status": "main",
+      "platforms": ["linux"],
+      "added": "2026-11-04",
+      "docs": ["workers/scrawl-server/README.md", "docs/receiver.md"]
+    },
+    {
       "id": "scrawl-web-send",
       "group": "delivery",
       "name": "Send bundles from a web page",

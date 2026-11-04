@@ -2,7 +2,12 @@
 //! crate; this only turns a Workers request into its `Request`, keeps bundles in the R2 bucket
 //! bound as `BUNDLES`, and reads the token from the `SCRAWL_TOKEN` secret. See `README.md` here.
 
-use worker::{Bucket, Context, Date, Env, HttpMetadata, Method, Request, Response, Result, event};
+use std::time::Duration;
+
+use worker::{
+    Bucket, Context, Date, Delay, Env, Fetch, Headers, HttpMetadata, Method, Request, RequestInit,
+    Response, Result, event,
+};
 
 struct R2(Bucket);
 
@@ -61,7 +66,7 @@ impl scrawl_server::Store for R2 {
 }
 
 #[event(fetch)]
-async fn fetch(mut request: Request, env: Env, _ctx: Context) -> Result<Response> {
+async fn fetch(mut request: Request, env: Env, ctx: Context) -> Result<Response> {
     let config = scrawl_server::Config {
         token: env
             .secret("SCRAWL_TOKEN")
@@ -137,7 +142,78 @@ async fn fetch(mut request: Request, env: Env, _ctx: Context) -> Result<Response
         &R2(env.bucket("BUNDLES")?),
     )
     .await;
+    // A new bundle rings the webhook, if one is set, once the uploader has its answer.
+    if let Some(entry) = reply.saved.clone()
+        && let Ok(hook) = env.secret("SCRAWL_WEBHOOK_URL")
+    {
+        let base = url.origin().ascii_serialization();
+        let secret = env
+            .secret("SCRAWL_WEBHOOK_SECRET")
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        let bucket = env.bucket("BUNDLES")?;
+        ctx.wait_until(async move {
+            ring(hook.to_string(), secret, *entry, base, R2(bucket)).await;
+        });
+    }
     send(reply)
+}
+
+/// Sends the webhook for `entry`, trying three times (now, after 2 s, after 8 s): a Worker may
+/// keep working for 30 s after it answers. What still fails is logged; the bundle is kept either
+/// way, and the courier and MCP read it from the list.
+async fn ring(hook: String, secret: String, entry: scrawl_server::Entry, base: String, store: R2) {
+    if !scrawl_server::webhook::allowed(&hook) {
+        worker::console_error!("scrawl-server: SCRAWL_WEBHOOK_URL must be an https:// address");
+        return;
+    }
+    let body = match scrawl_server::webhook::message(&entry, &base, &store).await {
+        Ok(body) => body,
+        Err(error) => {
+            worker::console_error!("scrawl-server: webhook: storage: {error}");
+            return;
+        }
+    };
+    let mut last = String::new();
+    for wait in [0, 2, 8] {
+        if wait > 0 {
+            Delay::from(Duration::from_secs(wait)).await;
+        }
+        match post(&hook, &secret, &entry.id, &body).await {
+            Ok(status) if (200..300).contains(&status) => return,
+            Ok(status) => last = format!("answered {status}"),
+            Err(error) => last = error.to_string(),
+        }
+    }
+    worker::console_error!(
+        "scrawl-server: webhook for {} not delivered: {last}",
+        entry.id
+    );
+}
+
+async fn post(hook: &str, secret: &str, id: &str, body: &[u8]) -> Result<u16> {
+    let headers = Headers::new();
+    headers.set("Content-Type", "application/json")?;
+    headers.set("User-Agent", "scrawl-server")?;
+    headers.set("X-Scrawl-Event", scrawl_server::webhook::EVENT)?;
+    headers.set("X-Scrawl-Delivery", id)?;
+    // Signed when a secret is set; a chat app's address (which is itself the secret) needs none.
+    if !secret.is_empty() {
+        let now = Date::now().as_millis() / 1000;
+        headers.set("X-Scrawl-Timestamp", &now.to_string())?;
+        headers.set(
+            "X-Scrawl-Signature",
+            &scrawl_server::webhook::signature(secret, now, body),
+        )?;
+    }
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post)
+        .with_headers(headers)
+        .with_body(Some(body.to_vec().into()));
+    let response = Fetch::Request(Request::new_with_init(hook, &init)?)
+        .send()
+        .await?;
+    Ok(response.status_code())
 }
 
 fn send(reply: scrawl_server::Response) -> Result<Response> {

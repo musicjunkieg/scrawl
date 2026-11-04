@@ -154,6 +154,9 @@ fn a_bundle_sent_twice_is_kept_once() {
     ));
     assert_eq!((first.status, again.status), (200, 200));
     assert_eq!(reply(&first), reply(&again));
+    // Only the first copy is new, so only it rings the webhook.
+    assert_eq!(first.saved.as_ref().map(|e| e.id.as_str()), Some("web-1"));
+    assert!(again.saved.is_none());
     assert_eq!(store.objects.borrow().len(), objects);
     // Cut off before its entry was written, it's written again rather than taken as here.
     store
@@ -846,4 +849,112 @@ fn a_storage_failure_is_a_json_rpc_error_for_its_request() {
     assert_eq!(listed.status, 500);
     assert!(!String::from_utf8_lossy(&listed.body).contains("R2 is down"));
     assert_eq!(listed.log.as_deref(), Some("storage: R2 is down"));
+}
+
+#[test]
+fn the_webhook_says_which_bundle_came_in_and_signs_it() {
+    let store = MemoryStore::default();
+    let saved = run(handle(
+        &config(),
+        request("POST", "/bundles", bundle("web-1", 1_000)),
+        &store,
+    ))
+    .saved
+    .expect("a new bundle");
+    let body = run(webhook::message(&saved, "https://r.example/", &store)).unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value["event"], "bundle.saved");
+    assert_eq!(value["id"], "web-1");
+    assert_eq!(value["url"], "https://r.example/bundles/web-1");
+    assert_eq!(value["summary"], "[scrawl 0:18]");
+    assert_eq!(value["app"], "ScrawlDemo");
+    assert_eq!(
+        value["text"],
+        "New Scrawl recording from ScrawlDemo (0:18): web-1"
+    );
+    assert_eq!(value["content"], value["text"]);
+    assert!(value.get("summaryCut").is_none());
+
+    // The signature a receiver checks, against one worked out separately (Python's hmac).
+    assert_eq!(
+        webhook::signature("whsec", 1_700_000_000, br#"{"a":1}"#),
+        "sha256=8ad37ba156048ae0e0a5533c75cdf26fee88b07f93cb57ee4c80adb053012032"
+    );
+    let signed = webhook::signature("whsec", 1_700_000_000, &body);
+    assert!(webhook::verify(
+        "whsec",
+        1_700_000_000,
+        &body,
+        &signed,
+        1_700_000_100
+    ));
+    assert!(!webhook::verify(
+        "other",
+        1_700_000_000,
+        &body,
+        &signed,
+        1_700_000_100
+    ));
+    assert!(!webhook::verify(
+        "whsec",
+        1_700_000_000,
+        b"changed",
+        &signed,
+        1_700_000_100
+    ));
+    // Too old (a replay) or malformed.
+    assert!(!webhook::verify(
+        "whsec",
+        1_700_000_000,
+        &body,
+        &signed,
+        1_700_001_000
+    ));
+    assert!(!webhook::verify(
+        "whsec",
+        1_700_000_000,
+        &body,
+        "sha256=zz",
+        1_700_000_000
+    ));
+    assert!(!webhook::verify(
+        "whsec",
+        1_700_000_000,
+        &body,
+        &signed[7..],
+        1_700_000_000
+    ));
+}
+
+#[test]
+fn a_long_summary_is_cut_on_a_character() {
+    let entry = Entry {
+        id: "a".into(),
+        created_at_ms: 0,
+        received_at_ms: 0,
+        duration_ms: 65_000,
+        app: None,
+        device: None,
+        files: vec![],
+        bytes: 0,
+    };
+    let summary = "é".repeat(webhook::MAX_SUMMARY);
+    let value: serde_json::Value =
+        serde_json::from_slice(&webhook::body(&entry, "https://r.example", &summary)).unwrap();
+    assert_eq!(value["summaryCut"], true);
+    assert_eq!(
+        value["summary"].as_str().unwrap().len(),
+        webhook::MAX_SUMMARY
+    );
+    assert_eq!(value["text"], "New Scrawl recording (1:05): a");
+}
+
+#[test]
+fn the_webhook_only_goes_to_https() {
+    assert!(webhook::allowed("https://hooks.slack.com/services/T/B/x"));
+    assert!(webhook::allowed("https://example.com"));
+    assert!(!webhook::allowed("http://example.com/hook"));
+    assert!(!webhook::allowed("https://"));
+    assert!(!webhook::allowed("https://user:pass@example.com/"));
+    assert!(!webhook::allowed("ftp://example.com"));
 }

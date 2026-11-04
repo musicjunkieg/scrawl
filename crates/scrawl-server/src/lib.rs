@@ -12,6 +12,9 @@
 //! - `GET /health`: whether the token is right (ScrawlKit asks before it sends).
 //! - `GET /`: says the receiver is up, without a token.
 //!
+//! A bundle new here comes back in [`Response::saved`], for the front end to announce on the
+//! webhook (`webhook.rs`) after it answers.
+//!
 //! Every other request needs `Authorization: Bearer <token>`, or `X-Scrawl-Token: <token>` (see
 //! [`authorization`]). The token reads and sends everything; the upload token, the one an app
 //! carries (anyone can pull it out of the app), only sends bundles and checks itself at `/health`.
@@ -22,6 +25,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 mod mcp;
+pub mod webhook;
 pub mod zip;
 
 /// 40 MB. A Worker has 128 MB of memory, and an upload is held twice while it's unpacked (the
@@ -56,6 +60,9 @@ pub struct Response {
     /// What went wrong, for the server's own log; never sent, since a storage error can name
     /// the provider's internals.
     pub log: Option<String>,
+    /// The bundle this request stored, when it's new here (not a second copy): what a front end
+    /// hands to the webhook (`webhook.rs`).
+    pub saved: Option<Box<Entry>>,
 }
 
 impl Response {
@@ -65,6 +72,7 @@ impl Response {
             content_type: "application/json",
             body: serde_json::to_vec(value).unwrap_or_default(),
             log: None,
+            saved: None,
         }
     }
 
@@ -276,6 +284,7 @@ pub async fn handle(config: &Config, mut request: Request, store: &impl Store) -
                 content_type: "text/plain; charset=utf-8",
                 body: b"scrawl-server\n".to_vec(),
                 log: None,
+                saved: None,
             },
             _ => Response::error(405, "not allowed here"),
         };
@@ -491,7 +500,10 @@ async fn upload(
     store
         .put(&format!("{folder}.json"), entry_json, "application/json")
         .await?;
-    Ok(saved_reply(&id))
+    Ok(Response {
+        saved: Some(Box::new(entry)),
+        ..saved_reply(&id)
+    })
 }
 
 async fn list(query: &str, store: &impl Store) -> Result<Response, String> {
@@ -543,6 +555,7 @@ async fn entry(id: &str, store: &impl Store) -> Result<Response, String> {
                 content_type: "application/json",
                 body: bytes,
                 log: None,
+                saved: None,
             },
             None => Response::error(404, "no such bundle"),
         },
@@ -560,6 +573,7 @@ async fn file_of(id: &str, path: &str, store: &impl Store) -> Result<Response, S
                 content_type: content_type(path),
                 body: bytes,
                 log: None,
+                saved: None,
             },
             None => Response::error(404, "no such file"),
         },
