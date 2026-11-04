@@ -544,10 +544,10 @@
     {
       "id": "scrawlkit-bundle-upload",
       "group": "iphone",
-      "name": "Upload bundles built on the iPhone",
-      "says": "With compiles = .onDevice and a setup link to a scrawl-server, ScrawlKit uploads each bundle it builds to the receiver's POST /bundles through the background outbox, so an agent can fetch it over MCP.",
+      "name": "Upload bundles built in the app",
+      "says": "With compiles = .onDevice and a setup link to a scrawl-server, ScrawlKit uploads each bundle it builds to the receiver's POST /bundles through its outbox (on the iPhone a background one), so an agent can fetch it over MCP. On the Mac, Help › Send Recordings to a Scrawl Server takes the link from the clipboard.",
       "status": "main",
-      "platforms": ["ios"],
+      "platforms": ["ios", "mac"],
       "added": "2026-10-30",
       "docs": ["docs/receiver.md", "Examples/ScrawlDemo.swiftpm/README.md"]
     },

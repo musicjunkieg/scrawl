@@ -14,6 +14,8 @@ struct ScrawlDemoMacApp: App {
         .scrawl()
         .scrawlScreen("Demo")
     }
+    // Help › Record with Scrawl and the rest, drawn by SwiftUI so they're there every time.
+    .commands { ScrawlCommands() }
   }
 }
 
