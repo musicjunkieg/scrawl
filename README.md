@@ -437,6 +437,7 @@ and app events on one clock.
 import ScrawlKit
 
 WindowGroup { ContentView().scrawl() }   // ⌃⌥⇧S, or Help › Record with Scrawl, starts and stops
+  .commands { ScrawlCommands() }         // the Help menu items, drawn by SwiftUI
 Scrawl.event("Saved")                    // optional: what the app did, on the timeline
 ```
 
@@ -445,7 +446,8 @@ drag to draw; Help › Mark This Moment adds a marker and Help › Discard Scraw
 recording away. A recording under a second with nothing clicked, drawn, marked or reported by the
 app (`Scrawl.event`) is a slip and isn't kept. Dragging the window by its title bar moves the
 recording with it and isn't a drag in the summary. `Scrawl.shared.shortcut` changes the key and
-`addsMenuItems = false` leaves the Help menu alone.
+`addsMenuItems = false` leaves the Help menu alone. Without `ScrawlCommands`, a SwiftUI app's Help
+menu can drop the items when it opens (SwiftUI rebuilds it), so they may take a second click.
 
 It records with ScreenCaptureKit, so macOS asks once to let the app record the screen (System
 Settings › Privacy & Security › Screen & System Audio Recording, then the app restarts). Only the

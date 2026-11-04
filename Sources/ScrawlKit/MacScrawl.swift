@@ -764,7 +764,14 @@
     fileprivate var menuTitle: String { isRecording || isStarting ? "Stop and Send Scrawl Recording" : "Record with Scrawl" }
 
     private func addMenuItems() {
-      guard addsMenuItems, let menu = Self.helpMenu() else { return }
+      guard addsMenuItems else {
+        // Turned off after they were added (`ScrawlCommands` draws them instead).
+        for item in NSApp.helpMenu?.items ?? [] where item.tag == Self.menuTag {
+          NSApp.helpMenu?.removeItem(item)
+        }
+        return
+      }
+      guard let menu = Self.helpMenu() else { return }
       guard !menu.items.contains(where: { $0.tag == Self.menuTag }) else { return }
       let separator = NSMenuItem.separator()
       separator.tag = Self.menuTag
@@ -874,6 +881,32 @@
     /// Turns Scrawl on for this app: the shortcut (⌃⌥⇧S) and Help › Record with Scrawl.
     func scrawl() -> some View {
       onAppear { Scrawl.shared.install() }
+    }
+  }
+
+  /// Scrawl's Help menu items, drawn by SwiftUI: `.commands { ScrawlCommands() }` on the app's
+  /// scene. SwiftUI rebuilds the Help menu as it opens, dropping items added from outside, so a
+  /// SwiftUI app shows them reliably this way; `install()` then leaves the Help menu alone.
+  @MainActor
+  public struct ScrawlCommands: Commands {
+    public init() {
+      Scrawl.shared.addsMenuItems = false
+    }
+
+    private var scrawl: Scrawl { .shared }
+
+    public var body: some Commands {
+      CommandGroup(after: .help) {
+        Divider()
+        Button(scrawl.menuTitle) { scrawl.toggle() }
+          .disabled(scrawl.isFinishing)
+        Button("Mark This Moment") { scrawl.mark() }
+          .disabled(!scrawl.isRecording)
+        Button("Discard Scrawl Recording") { scrawl.discard() }
+          .disabled(!scrawl.isRecording)
+        Button(scrawl.receiverMenuTitle) { scrawl.toggleReceiver() }
+          .disabled(scrawl.isRecording || scrawl.isStarting)
+      }
     }
   }
 #endif
