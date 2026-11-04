@@ -69,6 +69,26 @@ the recordings, look at one (its `summary.md` and contact sheet) and open a fram
 
 Its tools are `list_scrawls`, `get_scrawl` (the newest unless given an id) and `get_scrawl_file`.
 
+## Ring a webhook when a recording arrives
+
+Set `SCRAWL_WEBHOOK_URL` (an `https://` address) in `.secrets.env` and deploy, and each new
+bundle is announced there with a POST, after the upload is answered. A second copy of a bundle
+announces nothing.
+
+- **Slack or Discord:** paste the channel's incoming-webhook address. The message's `text` (Slack)
+  and `content` (Discord) read `New Scrawl recording from <app> (1:05): <id>`.
+- **Your own service:** also set `SCRAWL_WEBHOOK_SECRET`, and check `X-Scrawl-Signature` against
+  `sha256=` and the hex HMAC-SHA256 of `<X-Scrawl-Timestamp>.<body>` with that secret, refusing a
+  timestamp more than 5 minutes off (`webhook::verify` in `crates/scrawl-server` does this). In
+  Node: `"sha256=" + createHmac("sha256", secret).update(`${timestamp}.`).update(body).digest("hex")`.
+
+The body is JSON: `event` (`bundle.saved`), `id`, `url` (the bundle here, which needs your
+token), `receivedAtMs`, `createdAtMs`, `durationMs`, `app`, `device`, and `summary`, the bundle's
+`summary.md` (the first 16 KB, with `summaryCut: true` past that). The summary holds the narration,
+so send it only somewhere you'd keep the recording. A failed send (an error, no answer in 5 seconds, or a redirect,
+which isn't followed) is tried twice more, after 2 and 8 seconds; every try carries the same `X-Scrawl-Delivery` (the bundle's id), so a repeat can be
+dropped. One that still fails is logged (`cf tail`), and the bundle is kept either way.
+
 ## Run it on your own machine
 
 `pnpm run dev` runs it on `workerd`, Cloudflare's open-source runtime, with a local bucket.

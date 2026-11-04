@@ -11,6 +11,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
+futures-util = { version = "0.3.34", default-features = false }
 scrawl-server = { path = "../../crates/scrawl-server" }
 worker = "0.8.7"
 

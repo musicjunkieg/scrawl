@@ -4800,8 +4800,10 @@ version = "0.3.5"
 dependencies = [
  "base64",
  "flate2",
+ "hmac",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]
