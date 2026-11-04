@@ -23,6 +23,36 @@ bundle.summary;  // summary.md: hand this to the agent
 bundle.zip();    // a Blob: <id>.scrawl/ with contact-sheet.png, frames/, scrawl.json, summary.md
 ```
 
+## Sending it to a receiver
+
+`bundle.send({ url })` posts the zip to your own backend, which passes it on to a
+[`scrawl-server`](../../workers/scrawl-server/README.md) where an agent reads it over MCP. The
+page never holds the receiver's token, and the receiver needs no CORS.
+
+```js
+// In the page:
+const reply = await bundle.send({ url: "/api/scrawl" }); // { ok: true, state: "saved", id }
+```
+
+```js
+// In your backend (Workers, Next.js route handlers, Deno, Bun, Hono: a Request in, a Response out):
+import { relayBundle } from "scrawl-web/relay";
+
+export async function POST(request) {
+  // Check that this person may send recordings first: the relay only forwards.
+  return relayBundle(request, {
+    url: "https://scrawl-server.you.workers.dev",
+    token: process.env.SCRAWL_UPLOAD_TOKEN, // the upload-only token
+  });
+}
+```
+
+The relay refuses anything but a POST of `application/zip` with a `Content-Length` of 40 MB or
+less (the receiver's limit) before reading it, and answers with the receiver's reply. A refusal
+makes `send` throw, with `status` and `reply` on the error. The receiver allows 20 uploads a
+minute from one address, and every relayed upload comes from your backend's address, so a busy
+site shares that limit.
+
 ## Transcription
 
 - **Your `transcribe` function** (the default path): Scrawl records the microphone and calls

@@ -542,6 +542,16 @@
       "docs": ["docs/receiver.md", "workers/scrawl-server/README.md"]
     },
     {
+      "id": "scrawl-web-send",
+      "group": "delivery",
+      "name": "Send bundles from a web page",
+      "says": "scrawl-web's bundle.send posts a recorded page's bundle to the page's own backend, where relayBundle (scrawl-web/relay) passes it on to a scrawl-server with the upload token, so the token stays on the server and an agent reads the recording over MCP.",
+      "status": "main",
+      "platforms": ["mac", "windows", "linux"],
+      "added": "2026-11-04",
+      "docs": ["packages/scrawl-web/README.md", "docs/receiver.md"]
+    },
+    {
       "id": "scrawlkit-bundle-upload",
       "group": "iphone",
       "name": "Upload bundles built in the app",
