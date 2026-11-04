@@ -5,7 +5,7 @@
 //! The body is JSON: `event` (`"bundle.saved"`), `id`, `url` (the bundle's entry here, which needs
 //! the token), `receivedAtMs`, `createdAtMs`, `durationMs`, `app`, `device`, `summary`
 //! (`summary.md`, cut at [`MAX_SUMMARY`] bytes, with `summaryCut: true`), and `text` and
-//! `content`, one line for Slack and Discord, which show those. Headers: `X-Scrawl-Event`,
+//! `content`, one line for Slack and Discord, which show those (mentioning no one). Headers: `X-Scrawl-Event`,
 //! `X-Scrawl-Delivery` (the bundle's id, the same on every try, so a receiver can drop repeats),
 //! `X-Scrawl-Timestamp` (seconds) and `X-Scrawl-Signature: sha256=<hex>`, an HMAC-SHA256 with the
 //! webhook secret of `<timestamp>.<body>` (see [`verify`]).
@@ -20,6 +20,10 @@ pub const EVENT: &str = "bundle.saved";
 /// The most of `summary.md` a message carries (16 KB), so a long narration can't make one too
 /// big for a chat app.
 pub const MAX_SUMMARY: usize = 16 * 1024;
+
+/// The most of the app's name the one-line message shows, so a long one can't push it past what
+/// a chat app takes (Discord: 2,000 characters).
+pub const MAX_APP_CHARS: usize = 100;
 
 /// How far a timestamp may be from now (5 minutes) before [`verify`] calls it a replay.
 pub const TOLERANCE_S: u64 = 300;
@@ -51,17 +55,32 @@ pub fn body(entry: &Entry, base: &str, summary: &str) -> Vec<u8> {
         end -= 1;
     }
     let seconds = entry.duration_ms / 1000;
-    let line = format!(
-        "New Scrawl recording{} ({}:{:02}): {}",
-        entry
-            .app
-            .as_deref()
-            .map(|app| format!(" from {app}"))
-            .unwrap_or_default(),
-        seconds / 60,
-        seconds % 60,
-        entry.id
-    );
+    // The app's name comes from the upload, so it can't mention anyone: Slack's `<!channel>` is
+    // escaped in `text`, and Discord is told to parse no mentions in `content`.
+    let line = |app: &str| {
+        format!(
+            "New Scrawl recording{} ({}:{:02}): {}",
+            if app.is_empty() {
+                String::new()
+            } else {
+                format!(" from {app}")
+            },
+            seconds / 60,
+            seconds % 60,
+            entry.id
+        )
+    };
+    let app: String = entry
+        .app
+        .as_deref()
+        .unwrap_or_default()
+        .chars()
+        .take(MAX_APP_CHARS)
+        .collect();
+    let slack_app = app
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
     let mut value = serde_json::json!({
         "event": EVENT,
         "id": entry.id,
@@ -72,8 +91,9 @@ pub fn body(entry: &Entry, base: &str, summary: &str) -> Vec<u8> {
         "app": entry.app,
         "device": entry.device,
         "summary": &summary[..end],
-        "text": line,
-        "content": line,
+        "text": line(&slack_app),
+        "content": line(&app),
+        "allowed_mentions": { "parse": [] },
     });
     if cut {
         value["summaryCut"] = serde_json::Value::Bool(true);

@@ -85,8 +85,8 @@ announces nothing.
 The body is JSON: `event` (`bundle.saved`), `id`, `url` (the bundle here, which needs your
 token), `receivedAtMs`, `createdAtMs`, `durationMs`, `app`, `device`, and `summary`, the bundle's
 `summary.md` (the first 16 KB, with `summaryCut: true` past that). The summary holds the narration,
-so send it only somewhere you'd keep the recording. A failed send is tried twice more, after 2 and
-8 seconds; every try carries the same `X-Scrawl-Delivery` (the bundle's id), so a repeat can be
+so send it only somewhere you'd keep the recording. A failed send (an error, no answer in 5 seconds, or a redirect,
+which isn't followed) is tried twice more, after 2 and 8 seconds; every try carries the same `X-Scrawl-Delivery` (the bundle's id), so a repeat can be
 dropped. One that still fails is logged (`cf tail`), and the bundle is kept either way.
 
 ## Run it on your own machine

@@ -4,10 +4,15 @@
 
 use std::time::Duration;
 
+use futures_util::future::{Either, select};
 use worker::{
-    Bucket, Context, Date, Delay, Env, Fetch, Headers, HttpMetadata, Method, Request, RequestInit,
-    Response, Result, event,
+    AbortController, Bucket, Context, Date, Delay, Env, Fetch, Headers, HttpMetadata, Method,
+    Request, RequestInit, RequestRedirect, Response, Result, event,
 };
+
+/// How long one webhook try may take before it's given up: three tries and the waits between
+/// them (2 s and 8 s) fit in the 30 s a Worker may keep working after it answers.
+const WEBHOOK_DEADLINE: Duration = Duration::from_secs(5);
 
 struct R2(Bucket);
 
@@ -159,8 +164,8 @@ async fn fetch(mut request: Request, env: Env, ctx: Context) -> Result<Response>
     send(reply)
 }
 
-/// Sends the webhook for `entry`, trying three times (now, after 2 s, after 8 s): a Worker may
-/// keep working for 30 s after it answers. What still fails is logged; the bundle is kept either
+/// Sends the webhook for `entry`, trying three times (now, after 2 s, after 8 s), each for at most
+/// [`WEBHOOK_DEADLINE`]: a Worker may keep working for 30 s after it answers. What still fails is logged; the bundle is kept either
 /// way, and the courier and MCP read it from the list.
 async fn ring(hook: String, secret: String, entry: scrawl_server::Entry, base: String, store: R2) {
     if !scrawl_server::webhook::allowed(&hook) {
@@ -207,13 +212,27 @@ async fn post(hook: &str, secret: &str, id: &str, body: &[u8]) -> Result<u16> {
         )?;
     }
     let mut init = RequestInit::new();
+    // A redirect isn't followed (it could lead off https), so it counts as a failed try.
     init.with_method(Method::Post)
+        .with_redirect(RequestRedirect::Manual)
         .with_headers(headers)
         .with_body(Some(body.to_vec().into()));
-    let response = Fetch::Request(Request::new_with_init(hook, &init)?)
-        .send()
-        .await?;
-    Ok(response.status_code())
+    let request = Request::new_with_init(hook, &init)?;
+    let controller = AbortController::default();
+    let signal = controller.signal();
+    let fetch = Fetch::Request(request);
+    let sent = std::pin::pin!(fetch.send_with_signal(&signal));
+    let deadline = std::pin::pin!(Delay::from(WEBHOOK_DEADLINE));
+    match select(sent, deadline).await {
+        Either::Left((response, _)) => Ok(response?.status_code()),
+        Either::Right(_) => {
+            controller.abort();
+            Err(worker::Error::RustError(format!(
+                "no answer in {} s",
+                WEBHOOK_DEADLINE.as_secs()
+            )))
+        }
+    }
 }
 
 fn send(reply: scrawl_server::Response) -> Result<Response> {

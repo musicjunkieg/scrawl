@@ -950,6 +950,39 @@ fn a_long_summary_is_cut_on_a_character() {
 }
 
 #[test]
+fn an_app_name_mentions_no_one_and_stays_short() {
+    let mut entry = Entry {
+        id: "a".into(),
+        created_at_ms: 0,
+        received_at_ms: 0,
+        duration_ms: 5_000,
+        app: Some("<!channel> & @everyone".into()),
+        device: None,
+        files: vec![],
+        bytes: 0,
+    };
+    let message = |entry: &Entry| -> serde_json::Value {
+        serde_json::from_slice(&webhook::body(entry, "https://r.example", "")).unwrap()
+    };
+    let value = message(&entry);
+    assert_eq!(
+        value["text"],
+        "New Scrawl recording from &lt;!channel&gt; &amp; @everyone (0:05): a"
+    );
+    assert_eq!(
+        value["content"],
+        "New Scrawl recording from <!channel> & @everyone (0:05): a"
+    );
+    assert_eq!(value["allowed_mentions"]["parse"], serde_json::json!([]));
+    // The name itself is kept whole in `app`.
+    assert_eq!(value["app"], "<!channel> & @everyone");
+
+    entry.app = Some("é".repeat(5_000));
+    let content = message(&entry)["content"].as_str().unwrap().to_owned();
+    assert_eq!(content.matches('é').count(), webhook::MAX_APP_CHARS);
+}
+
+#[test]
 fn the_webhook_only_goes_to_https() {
     assert!(webhook::allowed("https://hooks.slack.com/services/T/B/x"));
     assert!(webhook::allowed("https://example.com"));
