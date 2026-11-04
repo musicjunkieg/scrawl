@@ -183,6 +183,14 @@
       ) { _ in
         MainActor.assumeIsolated { Scrawl.shared.addMenuItems() }
       }
+      // A rebuild while the app stays active drops them too, so they're added again (if missing)
+      // as the menu bar opens, right away (menus post this on the main thread) so the Help menu
+      // has them when it shows.
+      _ = NotificationCenter.default.addObserver(
+        forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil
+      ) { _ in
+        MainActor.assumeIsolated { Scrawl.shared.addMenuItems() }
+      }
       DispatchQueue.main.async { Scrawl.shared.addMenuItems() }
     }
 
