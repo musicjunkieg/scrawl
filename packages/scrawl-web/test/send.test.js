@@ -82,6 +82,13 @@ test("the relay refuses what isn't a bundle before reading it or calling the rec
   const big = await post({ "Content-Type": "application/zip" }, new Uint8Array(11));
   assert.equal(big.status, 413);
   assert.match((await big.json()).error, /over/);
+  // A length that understates the body is caught as it's read.
+  const understated = new Request("https://app.example/api/scrawl", {
+    method: "POST",
+    headers: { "Content-Type": "application/zip", "Content-Length": "4" },
+    body: new Uint8Array(11),
+  });
+  assert.equal((await relayBundle(understated, options)).status, 413);
   const unsized = new Request("https://app.example/api/scrawl", {
     method: "POST",
     headers: { "Content-Type": "application/zip" },

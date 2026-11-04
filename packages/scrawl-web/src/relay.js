@@ -19,8 +19,9 @@ export async function relayBundle(request, { url, token, maxBytes = MAX_UPLOAD_B
   const length = request.headers.get("content-length");
   if (length === null || !/^\d+$/.test(length)) return refuse(411, "Send the bundle with a Content-Length");
   if (Number(length) > maxBytes) return refuse(413, `The bundle is over ${Math.floor(maxBytes / 1024 / 1024)} MB`);
-  const body = await request.arrayBuffer();
-  if (body.byteLength > maxBytes) return refuse(413, `The bundle is over ${Math.floor(maxBytes / 1024 / 1024)} MB`);
+  // Counted as it's read, in case the length a request carries isn't what its body holds.
+  const body = await readAtMost(request, maxBytes);
+  if (!body) return refuse(413, `The bundle is over ${Math.floor(maxBytes / 1024 / 1024)} MB`);
   const base = String(url).endsWith("/") ? String(url) : `${url}/`;
   const reply = await post(new URL("bundles", base), {
     method: "POST",
@@ -31,6 +32,31 @@ export async function relayBundle(request, { url, token, maxBytes = MAX_UPLOAD_B
     status: reply.status,
     headers: { "Content-Type": reply.headers.get("content-type") || "application/json" },
   });
+}
+
+/** The body's bytes, or null (and the rest left unread) once it passes `max`. */
+async function readAtMost(request, max) {
+  if (!request.body) return new Uint8Array(0);
+  const reader = request.body.getReader();
+  const parts = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel();
+      return null;
+    }
+    parts.push(value);
+  }
+  const body = new Uint8Array(size);
+  let at = 0;
+  for (const part of parts) {
+    body.set(part, at);
+    at += part.byteLength;
+  }
+  return body;
 }
 
 function refuse(status, error) {

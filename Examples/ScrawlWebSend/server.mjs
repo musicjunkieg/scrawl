@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { relayBundle } from "../../packages/scrawl-web/src/relay.js";
+import { MAX_UPLOAD_BYTES, relayBundle } from "../../packages/scrawl-web/src/relay.js";
 
 const url = process.env.SCRAWL_URL;
 const token = process.env.SCRAWL_UPLOAD_TOKEN;
@@ -21,8 +21,17 @@ const web = resolve(here, "../../packages/scrawl-web");
 const types = { ".html": "text/html", ".js": "text/javascript", ".wasm": "application/wasm" };
 
 async function relay(req, res) {
+  // relayBundle refuses these too; checked here so an upload too big is never held.
+  const declared = req.headers["content-length"];
+  if (declared === undefined) return void res.writeHead(411).end();
+  if (!(Number(declared) <= MAX_UPLOAD_BYTES)) return void res.writeHead(413, { Connection: "close" }).end();
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let received = 0;
+  for await (const chunk of req) {
+    received += chunk.length;
+    if (received > MAX_UPLOAD_BYTES) return void res.writeHead(413, { Connection: "close" }).end();
+    chunks.push(chunk);
+  }
   const request = new Request(`http://localhost${req.url}`, {
     method: req.method,
     headers: req.headers,
@@ -30,7 +39,7 @@ async function relay(req, res) {
   });
   // A real site checks here that this person may send recordings.
   const reply = await relayBundle(request, { url, token });
-  console.log(`relayed ${chunks.reduce((n, c) => n + c.length, 0)} bytes → ${reply.status}`);
+  console.log(`relayed ${received} bytes → ${reply.status}`);
   res.writeHead(reply.status, { "Content-Type": reply.headers.get("content-type") });
   res.end(Buffer.from(await reply.arrayBuffer()));
 }
@@ -45,7 +54,12 @@ createServer((req, res) => {
     });
   }
   // The page, and scrawl-web's own files (src/, wasm/).
-  const file = path === "/" ? join(here, "index.html") : join(web, decodeURIComponent(path));
+  let file;
+  try {
+    file = path === "/" ? join(here, "index.html") : join(web, decodeURIComponent(path));
+  } catch {
+    return void res.writeHead(400).end(); // a malformed %-escape
+  }
   if (!file.startsWith(here) && !file.startsWith(web)) return void res.writeHead(404).end();
   let body;
   try {
