@@ -601,7 +601,7 @@
       }
       let confirm = NSAlert()
       confirm.messageText = "Send recordings to \(found.url.host() ?? "this Scrawl server")?"
-      confirm.informativeText = "Each bundle built here is sent there too, until you choose Stop Sending in the Help menu."
+      confirm.informativeText = "Each bundle built here is sent there too, until you choose Stop Sending in the Help menu. Any bundles still waiting to send, from before, go there as well."
       confirm.addButton(withTitle: "Send")
       confirm.addButton(withTitle: "Cancel")
       guard confirm.runModal() == .alertFirstButtonReturn else { return }
