@@ -76,7 +76,13 @@ export function createCourier({ server, token, folder, handoff = "folder", backl
     try {
       state = JSON.parse(text);
     } catch {}
-    if (!plain(state) || !plain(state.seen) || !plain(state.tries)) {
+    const valid =
+      plain(state) &&
+      plain(state.seen) &&
+      plain(state.tries) &&
+      Object.values(state.seen).every((value) => typeof value === "string") &&
+      Object.values(state.tries).every((value) => Number.isSafeInteger(value) && value >= 0);
+    if (!valid) {
       throw new Error(`${statePath} isn't a courier state file; fix or delete it (deleting it starts over)`);
     }
     return state;

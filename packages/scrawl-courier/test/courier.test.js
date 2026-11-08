@@ -189,7 +189,15 @@ test("a damaged state file stops the courier instead of starting over", async ()
   const dir = folder();
   const server = receiver([bundle("old-1")]);
   const courier = createCourier({ server: SERVER, token: TOKEN, folder: dir, fetch: server.fetch, log: quiet });
-  for (const text of ["{not json", "[]", "{}", '{"seen":[],"tries":{}}']) {
+  for (const text of [
+    "{not json",
+    "[]",
+    "{}",
+    '{"seen":[],"tries":{}}',
+    '{"seen":{},"tries":{"a":"2"}}',
+    '{"seen":{},"tries":{"a":-1}}',
+    '{"seen":{"a":1},"tries":{}}',
+  ]) {
     writeFileSync(join(dir, ".courier.json"), text);
     await assert.rejects(courier.poll(), /isn't a courier state file/, text);
     assert.equal(readFileSync(join(dir, ".courier.json"), "utf8"), text, "left as it was");
