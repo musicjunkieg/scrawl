@@ -69,6 +69,10 @@ the recordings, look at one (its `summary.md` and contact sheet) and open a fram
 
 Its tools are `list_scrawls`, `get_scrawl` (the newest unless given an id) and `get_scrawl_file`.
 
+To have each new recording handed to an agent without asking, run the courier beside it
+(`packages/scrawl-courier`): it downloads each one and runs any CLI agent, prompts an OpenCode
+session, or leaves it in a folder.
+
 ## Ring a webhook when a recording arrives
 
 Set `SCRAWL_WEBHOOK_URL` (an `https://` address) in `.secrets.env` and deploy, and each new
