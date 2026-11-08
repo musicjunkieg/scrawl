@@ -49,6 +49,7 @@ function command({ command: [program, ...args], timeoutSeconds, cwd }) {
       // Past timeoutSeconds it's asked to stop (SIGTERM), then made to (SIGKILL) if it hasn't
       // within KILL_AFTER_MS, and the hand-off fails then, so one stuck agent can't hold up the rest.
       let settled = false;
+      let timedOut = false;
       let kill = null;
       const settle = (error) => {
         if (settled) return;
@@ -59,6 +60,7 @@ function command({ command: [program, ...args], timeoutSeconds, cwd }) {
       };
       const timer = timeoutSeconds
         ? setTimeout(() => {
+            timedOut = true;
             child.kill("SIGTERM");
             kill = setTimeout(() => {
               child.kill("SIGKILL");
@@ -67,8 +69,15 @@ function command({ command: [program, ...args], timeoutSeconds, cwd }) {
           }, timeoutSeconds * 1000)
         : null;
       child.on("error", (error) => settle(new Error(`${program} didn't start: ${error.message}`)));
+      // Stopped for running too long counts as not delivered, even if it then exits cleanly.
       child.on("exit", (code, signal) =>
-        settle(code === 0 ? null : new Error(`${program} ended with ${signal ?? `exit code ${code}`}`)),
+        settle(
+          timedOut
+            ? new Error(`${program} ran past ${timeoutSeconds} s and was stopped`)
+            : code === 0
+              ? null
+              : new Error(`${program} ended with ${signal ?? `exit code ${code}`}`),
+        ),
       );
     });
 }

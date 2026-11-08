@@ -252,3 +252,27 @@ test("more new recordings than one look lists is said out loud", async () => {
   await busy.poll();
   assert.ok(logged.some((l) => /more than 100 new recordings/.test(l)), logged.join("\n"));
 });
+
+test("a command stopped for its time counts as not delivered even if it exits cleanly", async () => {
+  const dir = folder();
+  const list = [];
+  const server = receiver(list);
+  const handoff = {
+    command: [process.execPath, "-e", "process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000)"],
+    timeoutSeconds: 0.2,
+  };
+  const logged = [];
+  const courier = createCourier({ server: SERVER, token: TOKEN, folder: dir, fetch: server.fetch, handoff, log: (l) => logged.push(l) });
+  await courier.poll();
+  list.unshift(bundle("slow"));
+  assert.deepEqual(await courier.poll(), []);
+  assert.match(logged.at(-1), /slow not delivered.*ran past 0.2 s/);
+});
+
+test("a receiver answer that isn't a bundle list says so", async () => {
+  for (const body of ["null", '{"bundles":null}', '{"bundles":{}}', "not json"]) {
+    const fetch = async () => new Response(body, { headers: { "Content-Type": "application/json" } });
+    const courier = createCourier({ server: SERVER, token: TOKEN, folder: folder(), fetch, log: quiet });
+    await assert.rejects(courier.poll(), /didn't answer with a list of bundles/, body);
+  }
+});

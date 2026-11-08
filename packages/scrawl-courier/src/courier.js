@@ -124,8 +124,9 @@ export function createCourier({ server, token, folder, handoff = "folder", backl
   /** One look at the receiver: delivers what's new, oldest first. Returns the ids delivered. */
   async function poll() {
     await mkdir(folder, { recursive: true });
-    const { bundles = [] } = await (await request(`bundles?limit=${PAGE}`)).json();
-    const entries = bundles.filter((entry) => SAFE_ID.test(entry?.id ?? "") && Array.isArray(entry.files)).reverse();
+    const listed = await (await request(`bundles?limit=${PAGE}`)).json().catch(() => null);
+    if (!Array.isArray(listed?.bundles)) throw new Error("the receiver's GET /bundles didn't answer with a list of bundles");
+    const entries = listed.bundles.filter((entry) => SAFE_ID.test(entry?.id ?? "") && Array.isArray(entry.files)).reverse();
     // Maps without a prototype, so a recording named "constructor" isn't taken as seen.
     const bare = (object) => Object.assign(Object.create(null), object);
     let state = await readState();
