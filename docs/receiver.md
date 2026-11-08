@@ -2,7 +2,8 @@
 
 Status: R1 and R3 built (2026-10-29): `crates/scrawl-server` and `workers/scrawl-server`, with
 MCP at `/mcp`. R5's upload from ScrawlKit built for the iPhone (2026-10-30) and the Mac
-(2026-10-31); the rest is planned. It follows phase 8 (`scrawl-ffi`) in `docs/library.md`.
+(2026-10-31); R2, `scrawl-web`'s `bundle.send` (2026-11-04); R4's webhook (2026-11-04). The
+courier and the Mac app accepting built bundles are planned. It follows phase 8 (`scrawl-ffi`) in `docs/library.md`.
 
 ## Why
 
@@ -95,8 +96,15 @@ still hold bundles for the other hand-offs.
      inline). Its `instructions` tell the agent to read the summary with the contact sheet. The
      agent pulls when the person says "look at my last scrawl", so nothing needs to know which
      session is open.
-   - **Webhook**: a POST of the bundle's id, URL and summary to a configured address, for anything
-     else (a chat bot, a ticket).
+   - **Webhook** (built): a POST of the bundle's id, URL and summary to `SCRAWL_WEBHOOK_URL`
+     (`https://` only), for anything else (a chat bot, a ticket, the courier). `webhook.rs` builds
+     and signs it (`X-Scrawl-Signature`, HMAC-SHA256 of `<timestamp>.<body>` with
+     `SCRAWL_WEBHOOK_SECRET`); `handle` marks a bundle new to the store (`Response::saved`), and
+     the Worker sends it after answering (`waitUntil`), tried at 0, 2 and 8 s.
+   - **Courier** (planned): a small program beside the agent that asks `GET /bundles` for new
+     bundles (a laptop can't be reached from the cloud, so it asks instead of being rung),
+     downloads each, and hands it on through an adapter: a command (any CLI agent), OpenCode's
+     prompt, or a folder.
 
 ## Security and privacy
 
@@ -117,7 +125,7 @@ anyone's. On Workers its uploads are limited to 20 a minute from one address (a 
 | R1 | `scrawl-server`: `POST /bundles`, storage, list, ingest-shaped reply, tests with a memory store; the Worker on R2 (done) | 2 days |
 | R2 | `scrawl-web` `bundle.send` and `relayBundle` for the page's backend, in the browser test (done) | 0.5 day |
 | R3 | MCP hand-off at `/mcp` on the receiver (done) | 1 day |
-| R4 | OpenCode hand-off through `scrawl-route`, webhook | 1 day |
+| R4 | Webhook (done); the courier with command, OpenCode and folder adapters | 2 days |
 | R5 | ScrawlKit upload of on-device bundles (iPhone and Mac done), Mac app accepts built bundles | 1 day |
 
 ## Decisions (2026-10-29)
