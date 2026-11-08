@@ -61,12 +61,25 @@ export function createCourier({ server, token, folder, handoff = "folder", backl
     return response;
   }
 
+  /** The saved state, or null on a first run (no file yet). A file that can't be read or isn't
+   * the courier's stops it, rather than being taken for a first run and losing what was pending. */
   async function readState() {
+    let text;
     try {
-      return JSON.parse(await readFile(statePath, "utf8"));
-    } catch {
-      return null;
+      text = await readFile(statePath, "utf8");
+    } catch (error) {
+      if (error.code === "ENOENT") return null;
+      throw error;
     }
+    const plain = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+    let state = null;
+    try {
+      state = JSON.parse(text);
+    } catch {}
+    if (!plain(state) || !plain(state.seen) || !plain(state.tries)) {
+      throw new Error(`${statePath} isn't a courier state file; fix or delete it (deleting it starts over)`);
+    }
+    return state;
   }
 
   async function saveState(state) {

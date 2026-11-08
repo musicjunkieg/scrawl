@@ -26,7 +26,9 @@ try {
   process.exit(1);
 }
 const folder = String(config.folder ?? "~/Scrawl/Inbox").replace(/^~(?=\/|$)/, homedir());
-const every = Math.max(5, Number(config.every ?? 10));
+// Seconds between looks: at least 5; anything that isn't a number ("10s") is the default, 10.
+const asked = Number(config.every ?? 10);
+const every = Math.max(5, Number.isFinite(asked) ? asked : 10);
 
 let courier;
 try {
