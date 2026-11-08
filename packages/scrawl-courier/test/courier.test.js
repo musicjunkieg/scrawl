@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { MAX_TRIES, allowedServer, createCourier, safePath } from "../src/courier.js";
+import { MAX_TRIES, PAGE, allowedServer, createCourier, safePath } from "../src/courier.js";
 import { fill, pickSession } from "../src/handoffs.js";
 
 const SERVER = "https://r.example";
@@ -202,4 +202,53 @@ test("a damaged state file stops the courier instead of starting over", async ()
     await assert.rejects(courier.poll(), /isn't a courier state file/, text);
     assert.equal(readFileSync(join(dir, ".courier.json"), "utf8"), text, "left as it was");
   }
+});
+
+test("a recording named like a built-in property is delivered like any other", async () => {
+  const dir = folder();
+  const list = [];
+  const server = receiver(list);
+  const courier = createCourier({ server: SERVER, token: TOKEN, folder: dir, fetch: server.fetch, log: quiet });
+  await courier.poll();
+  list.unshift(bundle("constructor"), bundle("toString"), bundle("hasOwnProperty"));
+  assert.deepEqual((await courier.poll()).sort(), ["constructor", "hasOwnProperty", "toString"]);
+  assert.deepEqual(await courier.poll(), []);
+});
+
+test("a command that ignores SIGTERM past its time is killed and the hand-off fails", async () => {
+  const dir = folder();
+  const list = [];
+  const server = receiver(list);
+  const handoff = {
+    command: [process.execPath, "-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"],
+    timeoutSeconds: 0.2,
+  };
+  const logged = [];
+  const courier = createCourier({ server: SERVER, token: TOKEN, folder: dir, fetch: server.fetch, handoff, log: (l) => logged.push(l) });
+  await courier.poll();
+  list.unshift(bundle("stuck"));
+  const started = Date.now();
+  assert.deepEqual(await courier.poll(), []);
+  assert.ok(Date.now() - started < 10_000);
+  assert.match(logged.at(-1), /ran past 0.2 s and was stopped/);
+});
+
+test("more new recordings than one look lists is said out loud", async () => {
+  const dir = folder();
+  const list = [];
+  const server = receiver(list);
+  const logged = [];
+  const courier = createCourier({ server: SERVER, token: TOKEN, folder: dir, fetch: server.fetch, log: (l) => logged.push(l) });
+  await courier.poll();
+  for (let i = 0; i < PAGE + 5; i++) list.unshift(bundle(`r-${i}`));
+  const shown = list.slice(0, PAGE);
+  const limited = async (url, init) => {
+    if (new URL(url).pathname === "/bundles") {
+      return Response.json({ bundles: shown.map(({ id, app, files }) => ({ id, app, files: Object.keys(files) })) });
+    }
+    return server.fetch(url, init);
+  };
+  const busy = createCourier({ server: SERVER, token: TOKEN, folder: dir, fetch: limited, log: (l) => logged.push(l) });
+  await busy.poll();
+  assert.ok(logged.some((l) => /more than 100 new recordings/.test(l)), logged.join("\n"));
 });

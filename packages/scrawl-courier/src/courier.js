@@ -8,6 +8,11 @@ import { join } from "node:path";
 
 import { handoffFor } from "./handoffs.js";
 
+/** The newest recordings each look asks for: the receiver's most. If more than this many arrive
+ * between two looks (a laptop asleep while an app is busy), the older ones aren't listed; the
+ * courier says so rather than missing them quietly. */
+export const PAGE = 100;
+
 /** Tries before a recording that keeps failing to hand off is set aside (and logged). */
 export const MAX_TRIES = 3;
 
@@ -119,11 +124,19 @@ export function createCourier({ server, token, folder, handoff = "folder", backl
   /** One look at the receiver: delivers what's new, oldest first. Returns the ids delivered. */
   async function poll() {
     await mkdir(folder, { recursive: true });
-    const { bundles = [] } = await (await request("bundles?limit=50")).json();
+    const { bundles = [] } = await (await request(`bundles?limit=${PAGE}`)).json();
     const entries = bundles.filter((entry) => SAFE_ID.test(entry?.id ?? "") && Array.isArray(entry.files)).reverse();
+    // Maps without a prototype, so a recording named "constructor" isn't taken as seen.
+    const bare = (object) => Object.assign(Object.create(null), object);
     let state = await readState();
-    if (!state) {
-      state = { seen: {}, tries: {} };
+    if (state) {
+      state.seen = bare(state.seen);
+      state.tries = bare(state.tries);
+      if (entries.length >= PAGE && !entries.some((entry) => state.seen[entry.id])) {
+        log(`courier: more than ${PAGE} new recordings since the last look; older ones may not be delivered (they're still on the receiver)`);
+      }
+    } else {
+      state = { seen: bare({}), tries: bare({}) };
       if (!backlog) {
         for (const entry of entries) state.seen[entry.id] = "before";
         await saveState(state);

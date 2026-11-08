@@ -14,6 +14,9 @@ import { execFile, spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
+/** How long a command past its `timeoutSeconds` has to stop after SIGTERM before SIGKILL. */
+export const KILL_AFTER_MS = 5000;
+
 export function handoffFor(handoff) {
   if (handoff === "folder" || handoff == null) return async () => {};
   if (Array.isArray(handoff.command) && handoff.command.length > 0) return command(handoff);
@@ -43,16 +46,30 @@ function command({ command: [program, ...args], timeoutSeconds, cwd }) {
           SCRAWL_APP: bundle.app,
         },
       });
-      const timer = timeoutSeconds ? setTimeout(() => child.kill("SIGTERM"), timeoutSeconds * 1000) : null;
-      child.on("error", (error) => {
+      // Past timeoutSeconds it's asked to stop (SIGTERM), then made to (SIGKILL) if it hasn't
+      // within KILL_AFTER_MS, and the hand-off fails then, so one stuck agent can't hold up the rest.
+      let settled = false;
+      let kill = null;
+      const settle = (error) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
-        reject(new Error(`${program} didn't start: ${error.message}`));
-      });
-      child.on("exit", (code, signal) => {
-        clearTimeout(timer);
-        if (code === 0) resolve();
-        else reject(new Error(`${program} ended with ${signal ?? `exit code ${code}`}`));
-      });
+        clearTimeout(kill);
+        error ? reject(error) : resolve();
+      };
+      const timer = timeoutSeconds
+        ? setTimeout(() => {
+            child.kill("SIGTERM");
+            kill = setTimeout(() => {
+              child.kill("SIGKILL");
+              settle(new Error(`${program} ran past ${timeoutSeconds} s and was stopped`));
+            }, KILL_AFTER_MS);
+          }, timeoutSeconds * 1000)
+        : null;
+      child.on("error", (error) => settle(new Error(`${program} didn't start: ${error.message}`)));
+      child.on("exit", (code, signal) =>
+        settle(code === 0 ? null : new Error(`${program} ended with ${signal ?? `exit code ${code}`}`)),
+      );
     });
 }
 
