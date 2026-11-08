@@ -1,0 +1,19 @@
+{
+  "name": "scrawl-courier",
+  "version": "0.3.5",
+  "description": "Picks up new .scrawl recordings from a scrawl-server and hands each to an agent: a command, an OpenCode session, or a folder.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/musicjunkieg/scrawl.git",
+    "directory": "packages/scrawl-courier"
+  },
+  "type": "module",
+  "bin": { "scrawl-courier": "./bin/scrawl-courier.mjs" },
+  "exports": { ".": "./src/courier.js" },
+  "files": ["src", "bin"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

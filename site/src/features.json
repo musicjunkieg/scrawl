@@ -542,6 +542,16 @@
       "docs": ["docs/receiver.md", "workers/scrawl-server/README.md"]
     },
     {
+      "id": "scrawl-courier",
+      "group": "delivery",
+      "name": "Courier to any agent",
+      "says": "scrawl-courier runs beside your agent, picks up each new recording from scrawl-server (asking every few seconds with the read token), downloads it into a folder and hands it on: any CLI agent through a command, an OpenCode session, or the folder alone.",
+      "status": "main",
+      "platforms": ["mac", "windows", "linux"],
+      "added": "2026-11-08",
+      "docs": ["packages/scrawl-courier/README.md", "docs/receiver.md"]
+    },
+    {
       "id": "scrawl-server-webhook",
       "group": "delivery",
       "name": "Webhook for new recordings",

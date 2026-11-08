@@ -137,6 +137,8 @@ jobs:
       - run: packages/scrawl-web/scripts/build-wasm.sh
       - run: npm test
         working-directory: packages/scrawl-web
+      - run: npm test
+        working-directory: packages/scrawl-courier
       # Records the test page in Chromium: tab capture, a click, ⇧ ink, a fake transcriber.
       - run: npm install --no-save --prefix "$RUNNER_TEMP/pw" playwright@1.56.1
       - run: "\"$RUNNER_TEMP/pw/node_modules/.bin/playwright\" install --with-deps chromium"
